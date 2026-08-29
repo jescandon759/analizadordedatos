@@ -1,9 +1,14 @@
-# Analizador CRISP-DM
+# Analiza tus datos — analizador CRISP-DM
 
-App de Streamlit que recorre las **seis fases de CRISP-DM** sobre cualquier archivo
-tabular que suba el usuario: detecta errores en los datos, calcula KPIs (de catálogo
-o definidos por ti), genera insights de negocio con reglas estadísticas, entrena
-modelos con guardarraíles y exporta todo.
+App de Streamlit con **dos modos sobre el mismo motor**:
+
+- **Modo sencillo (el que se abre por defecto).** Subes tu archivo y ya. La app
+  limpia lo que puede limpiar sola, te dice qué corrigió, calcula tus KPIs,
+  escribe los hallazgos en español claro y te deja descargar el reporte. Cero
+  configuración antes de ver resultados.
+- **Modo avanzado (un interruptor en el menú lateral).** Las seis fases de
+  CRISP-DM con cada decisión en tus manos: mapeo de columnas, limpieza paso a
+  paso con bitácora, KPIs por fórmula, modelos predictivos y exportación.
 
 ---
 
@@ -14,17 +19,60 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Se abre en `http://localhost:8501`. Si no tienes datos a la mano, el botón
-**🎲 Usar datos de ejemplo** genera un archivo de ventas con errores típicos.
+Se abre en `http://localhost:8501`. Sin datos a la mano, el botón
+**Ver un ejemplo** genera un archivo de ventas con errores típicos.
 
 ### Desplegar en Streamlit Community Cloud
 
-1. Sube esta carpeta a un repositorio de GitHub.
-2. En [share.streamlit.io](https://share.streamlit.io) → *New app* → apunta a `app.py`.
-3. Listo. `requirements.txt` y `.streamlit/config.toml` ya están configurados.
+1. Sube todos los archivos `.py` y `requirements.txt` a un repositorio de GitHub,
+   en la raíz (no dentro de una carpeta).
+2. En [share.streamlit.io](https://share.streamlit.io) → *Create app* → *Main file
+   path*: `app.py`.
 
-> **Ojo:** en Community Cloud la app es pública. Cualquiera con el enlace puede subir
-> archivos. No la uses con datos confidenciales sin ponerle autenticación.
+> **Ojo:** en Community Cloud la app es pública. Cualquiera con el enlace puede
+> subir archivos. No la uses con datos confidenciales sin ponerle autenticación.
+
+---
+
+## Qué ve el usuario en el modo sencillo
+
+1. **Qué corregimos** — un aviso de cuántas cosas se arreglaron solas, el detalle
+   completo en un desplegable, y un botón para ver los datos sin tocar.
+2. **Confianza en los datos** — semáforo Alta / Media / Baja, con una frase que
+   explica qué significa. Sin puntajes técnicos.
+3. **Tus números** — hasta 6 KPIs detectados automáticamente, con su variación
+   contra el periodo anterior.
+4. **Lo más importante** — los hallazgos ordenados por impacto, cada uno con su
+   gráfica y redactado sin jerga.
+5. **Tus gráficas** — evolución en el tiempo y ranking por categoría.
+6. **Qué revisar en tus datos** — los problemas separados entre «ya lo
+   corregimos» y «necesita tu criterio».
+7. **Debajo de cada gráfica** — qué significa lo que se ve (mejor periodo, peor,
+   promedio, hacia dónde va) y, si hay valores fuera de lo normal, cuál es, qué tan
+   lejos está de lo normal y **de dónde salió**.
+8. **¿Interpretamos bien tus columnas?** — por si la detección automática falló.
+9. **Llévatelo** — reporte HTML y datos corregidos en CSV.
+
+---
+
+## Cómo se explican los valores atípicos
+
+La app **no puede saber la causa** de un pico y no la inventa. Lo que hace es
+descomponerlo con hechos verificables:
+
+- **¿Fue volumen o tamaño?** "Hubo 214 operaciones contra las 62 de un mes normal:
+  fue volumen, no operaciones más grandes."
+- **¿Una sola operación lo explica?** "Una sola operación de $182.1K (CLI-0001,
+  Cuishe 750) explica el 29.7% de todo el mes. Vale la pena confirmar que la cifra
+  sea correcta."
+- **¿Se concentró en una categoría?** "Se concentró en Mayoreo: 71% del mes, cuando
+  normalmente representa 24%."
+- **¿Es temporada?** "Es diciembre, que año con año es tu mes más fuerte (18% del
+  total anual). Probablemente sea temporada, no algo excepcional."
+
+La detección usa mediana y desviación absoluta mediana (MAD), no promedio y
+desviación estándar: el promedio se deja arrastrar por el propio pico que se busca.
+Debajo de cada bloque queda escrito que son pistas de origen, no causas.
 
 ---
 
@@ -131,31 +179,49 @@ pocos datos, clases desbalanceadas o desempeño inestable entre particiones.
 
 ## Estructura
 
+Todo vive en la raíz, sin carpetas (así lo necesita Streamlit Cloud cuando se
+suben los archivos por el navegador).
+
 ```
-app.py                 Interfaz: navegación por fases
-core/
-  loader.py            Lectura robusta (encoding, separador, hoja, encabezado)
-  profiling.py         Perfilado y tipos semánticos
-  quality.py           Motor de detección de errores + puntaje
-  prep.py              Transformaciones con bitácora
-  kpis.py              Catálogo de KPIs + intérprete de fórmulas
-  insights.py          Motor de reglas de negocio
-  modeling.py          AutoML, baselines, detección de fuga, evaluación
-  charts.py            Gráficas Plotly con paleta validada para daltonismo
-  deployment.py        Exportación, empaquetado de modelo, reporte HTML
-  utils.py             Coerción de tipos, formato, normalización de texto
-  demo.py              Generador de datos sucios de ejemplo
-tests/
-  test_pipeline.py     Prueba end-to-end del núcleo (sin Streamlit)
-  test_ui.py           Prueba de la interfaz con streamlit.testing
+app.py               Router: decide modo sencillo o avanzado
+sencillo.py          La pantalla única
+avanzado.py          Las seis fases de CRISP-DM
+estado.py            Estado compartido, carga y limpieza automática
+textos.py            Traducción de lo técnico a lenguaje de negocio
+loader.py            Lectura robusta (encoding, separador, hoja, encabezado)
+profiling.py         Perfilado y tipos semánticos
+quality.py           Motor de detección de errores + puntaje
+prep.py              Transformaciones con bitácora
+kpis.py              Catálogo de KPIs + intérprete de fórmulas
+insights.py          Motor de reglas de negocio (texto técnico y texto llano)
+modeling.py          AutoML, baselines, detección de fuga, evaluación
+charts.py            Gráficas Plotly con paleta validada para daltonismo
+deployment.py        Exportación, empaquetado de modelo, reporte HTML
+utils.py             Coerción de tipos, formato, normalización de texto
+demo.py              Generador de datos sucios de ejemplo
+test_pipeline.py     Prueba end-to-end del núcleo (sin Streamlit)
+test_ui.py           Prueba de ambos modos con streamlit.testing
 ```
 
 Correr las pruebas:
 
 ```bash
-python tests/test_pipeline.py
-python tests/test_ui.py
+python test_pipeline.py
+python test_ui.py
 ```
+
+---
+
+## Formatos y errores de lectura
+
+Acepta **CSV, TSV, .xlsx, .xlsm y .xls**. El formato viejo `.xls` (Excel 97-2003)
+necesita el paquete `xlrd`, que ya viene en `requirements.txt` — si lo quitas, la
+app te dirá exactamente eso y te propondrá guardar el archivo como `.xlsx`.
+
+Los errores de lectura nunca se muestran crudos: se traducen a qué pasó y qué hacer
+(formato viejo, archivo protegido con contraseña, codificación rara, columnas
+desparejas, archivo demasiado grande). El detalle técnico queda en un desplegable
+por si hace falta.
 
 ---
 

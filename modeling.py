@@ -41,7 +41,7 @@ from sklearn.model_selection import StratifiedKFold, KFold, cross_val_score, tra
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-from .utils import fmt_num, fmt_pct, safe_div, to_datetime_series, to_numeric_series
+from utils import fmt_num, fmt_pct, safe_div, to_datetime_series, to_numeric_series
 
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)

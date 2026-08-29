@@ -15,7 +15,7 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 
-from .utils import fmt_num, fmt_pct, safe_div, to_numeric_series
+from utils import fmt_num, fmt_pct, safe_div, to_numeric_series
 
 # --------------------------------------------------------------------------
 # Slots de negocio

@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from .utils import fmt_num, fmt_pct, safe_div, to_datetime_series, to_numeric_series
+from utils import fmt_num, fmt_pct, safe_div, to_datetime_series, to_numeric_series
 
 OPORTUNIDAD, RIESGO, HALLAZGO, CONTEXTO = "oportunidad", "riesgo", "hallazgo", "contexto"
 ICON = {OPORTUNIDAD: "▲", RIESGO: "▼", HALLAZGO: "◆", CONTEXTO: "●"}
@@ -22,10 +22,20 @@ ICON = {OPORTUNIDAD: "▲", RIESGO: "▼", HALLAZGO: "◆", CONTEXTO: "●"}
 class Insight:
     kind: str
     title: str
-    text: str
+    text: str                    # versión técnica (modo avanzado)
     impact: float = 0.5          # 0-1, ordena la lista
     evidence: dict = field(default_factory=dict)
     chart: dict | None = None    # {"type": ..., "data": ...} para dibujar en la app
+    simple: str = ""             # misma idea sin jerga (modo sencillo)
+    titulo_simple: str = ""
+
+    @property
+    def texto_llano(self) -> str:
+        return self.simple or self.text
+
+    @property
+    def titulo_llano(self) -> str:
+        return self.titulo_simple or self.title
 
 
 def _period_freq(span_days: int) -> tuple[str, str]:
@@ -110,6 +120,11 @@ def _r_temporal(df, mapping, out: list[Insight]) -> None:
             "tendencia para no distorsionarlo, pero siguen contando en los totales: "
             "corrígelos en la fase de Preparación.",
             impact=0.45, evidence={"descartadas": descartadas},
+            titulo_simple="Algunos registros tienen una fecha imposible",
+            simple=(f"{descartadas:,} registro(s) traen una fecha que no puede ser real "
+                    "(normalmente 1900, que es lo que aparece cuando el campo se dejó vacío). "
+                    "Los dejamos fuera de las gráficas de tiempo para que no las deformen, "
+                    "pero siguen contando en los totales."),
         ))
 
     # actualidad
@@ -120,6 +135,9 @@ def _r_temporal(df, mapping, out: list[Insight]) -> None:
             f"El último registro es del {f.max():%d/%m/%Y}, hace {dias_sin} días. "
             "Cualquier conclusión describe el pasado, no la operación actual.",
             impact=0.6, evidence={"dias_sin_datos": dias_sin},
+            titulo_simple="Tus datos no están al día",
+            simple=(f"El registro más reciente es del {f.max():%d/%m/%Y}, hace {dias_sin} días. "
+                    "Lo que ves aquí describe cómo iban las cosas entonces, no cómo van hoy."),
         ))
 
     # tendencia (regresión sobre el índice del periodo)
@@ -140,6 +158,12 @@ def _r_temporal(df, mapping, out: list[Insight]) -> None:
             evidence={"pendiente": sl, "r2": r**2, "p": p, "periodos": len(s)},
             chart={"type": "line", "x": list(s.index), "y": list(y),
                    "title": f"{val_col or 'Registros'} por {label}"},
+            titulo_simple=("Vas creciendo de forma sostenida" if sl > 0
+                           else "Vas cayendo de forma sostenida"),
+            simple=(f"{'Subes' if sl > 0 else 'Bajas'} alrededor de "
+                    f"{fmt_pct(abs(cambio_rel))} cada {label}, y no es casualidad: el patrón se "
+                    f"repite a lo largo de los {len(s)} {label}es analizados. Si sigue el mismo "
+                    f"ritmo, el próximo {label} andaría cerca de {fmt_num(y[-1] + sl)}."),
         ))
     else:
         out.append(Insight(
@@ -149,6 +173,9 @@ def _r_temporal(df, mapping, out: list[Insight]) -> None:
             impact=0.3, evidence={"p": p},
             chart={"type": "line", "x": list(s.index), "y": list(y),
                    "title": f"{val_col or 'Registros'} por {label}"},
+            titulo_simple="No hay una dirección clara",
+            simple=(f"Los altibajos de un {label} a otro son normales, no una señal de que "
+                    "vayas subiendo o bajando. Con esto no conviene hacer proyecciones."),
         ))
 
     # último periodo cerrado vs anterior y vs media histórica
@@ -171,6 +198,14 @@ def _r_temporal(df, mapping, out: list[Insight]) -> None:
                        if z < 0 else "Conviene entender qué lo provocó para intentar repetirlo."),
                     impact=min(0.95, 0.6 + abs(z) * 0.08),
                     evidence={"z": z, "ultimo": ultimo, "media": mu},
+                    titulo_simple=(f"El último {label} fue muy "
+                                   f"{'flojo' if z < 0 else 'bueno'}"),
+                    simple=(f"Cerró en {fmt_num(ultimo)}, cuando lo normal ronda "
+                            f"{fmt_num(mu)}. Es una diferencia grande, fuera de lo que suele "
+                            f"variar de un {label} a otro. "
+                            + ("Antes de alarmarte, confirma que el periodo esté completo."
+                               if z < 0 else
+                               "Vale la pena averiguar qué lo provocó para intentar repetirlo.")),
                 ))
 
 
@@ -204,6 +239,11 @@ def _r_estacionalidad(df, mapping, out: list[Insight]) -> None:
                     evidence={"mejor_dia": dias_es[mejor], "peor_dia": dias_es[peor]},
                     chart={"type": "bar", "labels": dias_es, "values": list(by_dow.values),
                            "title": f"{val_col or 'Registros'} por día de la semana"},
+                    titulo_simple=f"El {dias_es[mejor].lower()} es tu mejor día",
+                    simple=(f"{dias_es[mejor]} concentra {fmt_pct(share.max())} del total y "
+                            f"{dias_es[peor].lower()} apenas {fmt_pct(share.min())}. Si todos los "
+                            "días fueran iguales, cada uno tendría un 14%. Sirve directo para "
+                            "decidir turnos, inventario y cuándo lanzar promociones."),
                 ))
 
     if span >= 365:
@@ -222,6 +262,11 @@ def _r_estacionalidad(df, mapping, out: list[Insight]) -> None:
                     impact=0.65,
                     chart={"type": "bar", "labels": meses, "values": list(by_m.values),
                            "title": f"{val_col or 'Registros'} por mes"},
+                    titulo_simple=f"Tu año se concentra en {meses[int(share.idxmax())-1]}",
+                    simple=(f"{meses[int(share.idxmax())-1]} vale {fmt_pct(share.max())} del año "
+                            f"y {meses[int(share.idxmin())-1]} solo {fmt_pct(share.min())}. "
+                            "Planea tu efectivo y tu inventario con esa curva, no con el "
+                            "promedio anual."),
                 ))
 
 
@@ -260,6 +305,14 @@ def _r_concentracion(df, mapping, profiles, out: list[Insight]) -> None:
                 chart={"type": "bar", "labels": [str(i) for i in agg.head(10).index],
                        "values": list(agg.head(10).values),
                        "title": f"Top 10 de '{dim}' por {medida}", "highlight": k20},
+                titulo_simple=f"Casi todo depende de unos pocos ({dim})",
+                simple=(f"{k20} de {len(agg)} generan {fmt_pct(share20)} del total. "
+                        f"'{agg.index[0]}' por sí solo aporta {fmt_pct(top1)}. "
+                        + ("Eso es riesgoso: si ese se va, se cae buena parte del negocio. "
+                           "Vale la pena cuidarlo mucho y, en paralelo, buscar diversificar."
+                           if top1 > 0.3 else
+                           "Es el patrón normal 80/20: ahí es donde conviene poner el esfuerzo "
+                           "comercial.")),
             ))
 
         cola = agg[agg.cumsum() / agg.sum() > 0.95]
@@ -270,6 +323,11 @@ def _r_concentracion(df, mapping, profiles, out: list[Insight]) -> None:
                 f"menos del 5% {unidad}. Cada uno consume atención, inventario o costo de servicio; "
                 "depurar esa cola libera recursos sin afectar el resultado.",
                 impact=0.55, evidence={"n_cola": len(cola), "n_total": len(agg)},
+                titulo_simple=f"Tienes mucha cola improductiva en {dim}",
+                simple=(f"{len(cola)} de {len(agg)} ({len(cola)/len(agg):.0%}) aportan, entre "
+                        "todos juntos, menos del 5% del total. Cada uno te consume atención, "
+                        "inventario o costo de atender. Depurar esa lista te libera recursos "
+                        "casi sin afectar el resultado."),
             ))
 
 
@@ -298,6 +356,10 @@ def _r_segmentos(df, mapping, profiles, out: list[Insight]) -> None:
                 f"Las medias por categoría no son estadísticamente distintas (ANOVA p={p:.2f}). "
                 "Segmentar por aquí no aporta: busca otra variable explicativa.",
                 impact=0.25,
+                titulo_simple=f"Separar por '{dim}' no explica nada",
+                simple=(f"Todas las categorías de '{dim}' se comportan prácticamente igual en "
+                        f"'{val_col}'. Las diferencias que veas ahí son casualidad, no una "
+                        "señal. Busca otra forma de segmentar."),
             ))
             continue
 
@@ -318,6 +380,12 @@ def _r_segmentos(df, mapping, profiles, out: list[Insight]) -> None:
             evidence={"p": p, "mejor": str(mejor), "peor": str(peor)},
             chart={"type": "box", "dim": dim, "value": val_col,
                    "title": f"Distribución de '{val_col}' por '{dim}'"},
+            titulo_simple=f"'{mejor}' rinde mucho más que el resto",
+            simple=(f"Separando por '{dim}', **{mejor}** promedia "
+                    f"{fmt_num(medias.loc[mejor,'mean'])} contra "
+                    f"{fmt_num(medias.loc[peor,'mean'])} de **{peor}**. La diferencia es real, "
+                    "no ruido de los datos. Entender qué hace distinto al primero y copiarlo "
+                    "es la palanca más directa que tienes aquí."),
         ))
 
 
@@ -356,6 +424,12 @@ def _r_crecimiento_por_segmento(df, mapping, out: list[Insight]) -> None:
             f"{fmt_pct(baja['peso'])} del total, así que arrastra el resultado global.",
             impact=min(0.92, 0.6 + abs(baja["var"]) * 0.3 + baja["peso"]),
             evidence={"segmento": str(baja.name), "variacion": float(baja["var"])},
+            titulo_simple=f"'{baja.name}' se está cayendo",
+            simple=(f"Comparando la primera mitad del periodo contra la segunda, "
+                    f"**{baja.name}** bajó {fmt_pct(abs(baja['var']))} "
+                    f"({fmt_num(baja['antes'])} → {fmt_num(baja['despues'])}). Como pesaba "
+                    f"{fmt_pct(baja['peso'])} del total, esa caída arrastra el resultado "
+                    "general."),
         ))
     if sube["var"] > 0.15:
         out.append(Insight(
@@ -365,6 +439,11 @@ def _r_crecimiento_por_segmento(df, mapping, out: list[Insight]) -> None:
             "Vale la pena verificar si es sostenible antes de asignarle más recursos.",
             impact=min(0.88, 0.55 + sube["var"] * 0.2 + sube["peso"]),
             evidence={"segmento": str(sube.name), "variacion": float(sube["var"])},
+            titulo_simple=f"'{sube.name}' está despegando",
+            simple=(f"Subió {fmt_pct(sube['var'])} entre la primera y la segunda mitad del "
+                    f"periodo ({fmt_num(sube['antes'])} → {fmt_num(sube['despues'])}). "
+                    "Antes de meterle más recursos, confirma que el crecimiento sea sostenible "
+                    "y no un pico puntual."),
         ))
 
 
@@ -385,6 +464,11 @@ def _r_dispersion(df, mapping, out: list[Insight]) -> None:
             "hablar de 'el promedio' aquí engaña. Conviene analizar por rangos o segmentos.",
             impact=0.55, evidence={"cv": cv, "p50": p50, "p90": p90},
             chart={"type": "hist", "col": val_col, "title": f"Distribución de '{val_col}'"},
+            titulo_simple="Hablar del 'promedio' aquí te va a engañar",
+            simple=(f"Tus registros son muy dispares: la mitad está por debajo de "
+                    f"{fmt_num(p50)}, pero el 10% más grande arranca en {fmt_num(p90)}. "
+                    "El promedio queda en tierra de nadie. Conviene ver por rangos o por "
+                    "segmentos, no un solo número."),
         ))
 
     top = v.sort_values(ascending=False)
@@ -397,6 +481,10 @@ def _r_dispersion(df, mapping, out: list[Insight]) -> None:
             f"de la suma de '{val_col}'. Verifica que no sean errores de captura antes de "
             "usarlos como base de cualquier proyección.",
             impact=0.6, evidence={"share_top1pct": share},
+            titulo_simple="Unos pocos registros mueven casi todo el total",
+            simple=(f"Los {k} registros más grandes (el 1%) valen {fmt_pct(share)} de la suma. "
+                    "Antes de usar estos totales para proyectar, revisa a mano que no sean "
+                    "errores de captura: un cero de más en una venta cambia todo."),
         ))
 
 
@@ -425,6 +513,10 @@ def _r_correlaciones(df, profiles, mapping, out: list[Insight]) -> None:
             "Correlación no es causalidad — sirve como hipótesis, no como conclusión.",
             impact=0.4 + abs(r) * 0.2, evidence={"a": a, "b": b, "r": r},
             chart={"type": "scatter", "x": a, "y": b, "title": f"{a} vs. {b}"},
+            titulo_simple=f"'{a}' y '{b}' se mueven al mismo ritmo",
+            simple=(f"Cuando una sube, la otra {'sube' if r > 0 else 'baja'} de forma bastante "
+                    "consistente. Ojo: que vayan juntas no significa que una cause la otra. "
+                    "Tómalo como una pista para investigar, no como una conclusión."),
         ))
 
 
@@ -440,6 +532,10 @@ def _r_desbalance(df, profiles, out: list[Insight]) -> None:
                 "análisis aporta poco, y si fuera la variable objetivo de un modelo, la exactitud "
                 "sería engañosa (acertar siempre esa clase ya da esa cifra).",
                 impact=0.3, evidence={"columna": p.name, "dominante": str(vc.index[0])},
+                titulo_simple=f"'{p.name}' casi no varía",
+                simple=(f"El {fmt_pct(vc.iloc[0])} de los registros dice '{vc.index[0]}'. "
+                        "Como no hay variedad, esa columna no sirve para comparar ni para "
+                        "explicar nada."),
             ))
 
 
@@ -453,6 +549,10 @@ def _r_calidad(issues, out: list[Insight]) -> None:
             f"{top.title.lower()} — {top.detail} Resuélvelos en la fase de Preparación antes de "
             "tomar decisiones con estos números.",
             impact=0.98, evidence={"n_criticos": len(criticos)},
+            titulo_simple="Hay problemas en los datos que afectan estos números",
+            simple=(f"Detectamos {len(criticos)} problema(s) serio(s). El más grande: "
+                    f"{top.title.lower()}. Revisa la sección «Qué revisar en tus datos» antes "
+                    "de tomar decisiones con las cifras de arriba."),
         ))
 
 

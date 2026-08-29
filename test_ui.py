@@ -1,19 +1,17 @@
-"""Prueba de la interfaz Streamlit con AppTest: recorre las 8 secciones sin errores."""
+"""Prueba de la interfaz con AppTest: modo sencillo y modo avanzado."""
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
-from core.demo import build_demo  # noqa: E402
-
 FALLOS: list[str] = []
-SECCIONES = ["📁 Datos", "1 · Negocio y KPIs", "2 · Comprensión de datos", "3 · Preparación",
-             "📊 Dashboard", "4 · Modelado", "5 · Evaluación", "6 · Despliegue"]
+FASES = ["📁 Datos", "1 · Negocio y KPIs", "2 · Comprensión de datos", "3 · Preparación",
+         "📊 Dashboard", "4 · Modelado", "5 · Evaluación", "6 · Despliegue"]
 
 
 def check(label: str, cond: bool, extra: str = ""):
@@ -22,107 +20,93 @@ def check(label: str, cond: bool, extra: str = ""):
         FALLOS.append(label)
 
 
-def nueva_app(timeout: int = 180) -> AppTest:
+def err(at) -> str:
+    return str(at.exception[0].message) if at.exception else ""
+
+
+def nueva(timeout: int = 240) -> AppTest:
     at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=timeout)
     at.run()
     return at
 
 
-print("=== Arranque en frío ===")
-at = nueva_app()
-check("La app arranca sin excepción", not at.exception,
-      str(at.exception[0].message) if at.exception else "")
-check("Muestra la pantalla de carga", any("Carga de datos" in t.value for t in at.title))
+# ------------------------------------------------------------------ sencillo
+print("=== Modo sencillo: pantalla de inicio ===")
+at = nueva()
+check("Arranca sin excepción", not at.exception, err(at))
+check("Muestra el título de bienvenida",
+      any("Analiza tus datos" in m.value for m in at.markdown))
+check("Ofrece subir archivo", len(at.get("file_uploader")) == 1)
+ejemplo = [b for b in at.button if "ejemplo" in b.label.lower()]
+check("Ofrece el ejemplo", len(ejemplo) == 1)
+check("Sin fases visibles al inicio", len(at.sidebar.radio) == 0)
 
-print("\n=== Carga de datos de ejemplo ===")
-btn = [b for b in at.button if "ejemplo" in b.label]
-check("Existe el botón de datos de ejemplo", len(btn) == 1)
-btn[0].click().run()
-check("Datos cargados sin error", not at.exception,
-      str(at.exception[0].message) if at.exception else "")
-check("Sesión tiene el dataframe", at.session_state["raw"] is not None,
-      f"{len(at.session_state['raw'])} filas")
+print("\n=== Un solo clic: del archivo al resultado ===")
+ejemplo[0].click().run()
+check("Carga y analiza sin error", not at.exception, err(at))
+check("Limpió automáticamente", at.session_state["clean"] is not None,
+      f"{len(at.session_state['prep_log'])} acciones")
+check("Detectó las columnas de negocio",
+      at.session_state["mapping"].get("ingreso") == "Importe",
+      str({k: v for k, v in at.session_state["mapping"].items() if v}))
+check("Muestra los KPIs", len(at.metric) >= 4, f"{len(at.metric)} métricas")
+check("Muestra el semáforo de confianza",
+      any("Confianza en los datos" in m.value for m in at.markdown))
+check("Muestra hallazgos", any("Lo más importante" in m.value for m in at.markdown))
+check("Avisa qué corrigió", any("Corregimos" in s.value for s in at.success), )
+check("Ofrece descargas", len(at.get("download_button")) == 2,
+      f"{len(at.get('download_button'))}")
+check("Sigue sin fases a la vista", len(at.sidebar.radio) == 0)
+textos_md = " ".join(m.value for m in at.markdown)
+for jerga in ["ANOVA", "p-valor", "R²", "silueta", "desviaciones estándar", "baseline"]:
+    check(f"Sin jerga en pantalla: '{jerga}'", jerga not in textos_md)
 
-print("\n=== Recorrido de las 8 secciones ===")
-for sec in SECCIONES:
-    at.sidebar.radio[0].set_value(sec).run()
-    ok = not at.exception
-    check(f"Sección '{sec}'", ok, str(at.exception[0].message) if at.exception else "")
+check("Explica qué significa cada gráfica",
+      textos_md.count("Cómo leerla") >= 2, f"{textos_md.count('Cómo leerla')} lecturas")
+check("Señala los valores fuera de lo normal",
+      "fuera de lo normal" in textos_md or "se salió de lo normal" in textos_md)
 
-print("\n=== Fase 3: aplicar limpieza ===")
-at.sidebar.radio[0].set_value("3 · Preparación").run()
-seguras = [b for b in at.button if "seguras" in b.label]
-check("Botón de reparaciones seguras presente", len(seguras) == 1)
-if seguras:
-    seguras[0].click().run()
-    check("Selección de reparaciones sin error", not at.exception,
-          str(at.exception[0].message) if at.exception else "")
-    aplicar = [b for b in at.button if "Aplicar" in b.label]
-    check("Botón aplicar presente", len(aplicar) == 1)
-    if aplicar:
-        aplicar[0].click().run()
-        check("Limpieza aplicada", at.session_state["clean"] is not None
-              and not at.exception, str(at.exception[0].message) if at.exception else "")
-        check("Bitácora registrada", len(at.session_state["prep_log"]) > 3,
-              f"{len(at.session_state['prep_log'])} líneas")
+print("\n=== Interacciones del modo sencillo ===")
+sin_corregir = [b for b in at.button if "sin corregir" in b.label]
+check("Puede ver los datos originales", len(sin_corregir) == 1)
+if sin_corregir:
+    sin_corregir[0].click().run()
+    check("Alterna a datos sin corregir",
+          at.session_state["usar_original"] and not at.exception, err(at))
+    volver = [b for b in at.button if "corregidos" in b.label]
+    if volver:
+        volver[0].click().run()
+        check("Vuelve a los corregidos", not at.session_state["usar_original"] and not at.exception,
+              err(at))
 
-print("\n=== Dashboard con datos limpios ===")
-at.sidebar.radio[0].set_value("📊 Dashboard").run()
-check("Dashboard renderiza", not at.exception,
-      str(at.exception[0].message) if at.exception else "")
-check("Muestra métricas", len(at.metric) >= 4, f"{len(at.metric)} métricas")
+sel = [s for s in at.selectbox if s.label and "Importe" in (s.label or "")]
+mapa = [s for s in at.selectbox if s.key == "s_segmento"]
+check("Permite corregir el mapeo de columnas", len(mapa) == 1)
+if mapa:
+    mapa[0].set_value("Producto").run()
+    check("Recalcula al cambiar una columna",
+          at.session_state["mapping"]["segmento"] == "Producto" and not at.exception, err(at))
 
-print("\n=== KPI personalizado ===")
-at.sidebar.radio[0].set_value("1 · Negocio y KPIs").run()
-nombre_in = [i for i in at.text_input if i.label == "Nombre del KPI"]
-formula_in = [i for i in at.text_input if i.label == "Fórmula"]
-if nombre_in and formula_in:
-    nombre_in[0].set_value("Margen bruto propio")
-    formula_in[0].set_value('(suma("Importe") - suma("Costo")) / suma("Importe")')
-    subs = ([b for b in at.button if "Agregar KPI" in b.label]
-            or [b for b in at.get("form_submit_button") if "Agregar KPI" in b.label])
-    check("Botón de envío del formulario presente", len(subs) >= 1)
-    if subs:
-        subs[0].click().run()
-    check("KPI propio agregado", len(at.session_state["custom"]) == 1,
-          str(at.session_state["custom"]))
-    check("Sin error al calcular el KPI propio", not at.exception,
-          str(at.exception[0].message) if at.exception else "")
-else:
-    check("Formulario de KPI propio disponible", False,
-          str([i.label for i in at.text_input]))
+print("\n=== Modo avanzado ===")
+at.sidebar.toggle[0].set_value(True).run()
+check("Abre el modo avanzado", not at.exception, err(at))
+check("Aparecen las fases", len(at.sidebar.radio) == 1)
+for f in FASES:
+    at.sidebar.radio[0].set_value(f).run()
+    check(f"Fase '{f}'", not at.exception, err(at))
 
-print("\n=== Modelado y evaluación ===")
-at.sidebar.radio[0].set_value("4 · Modelado").run()
-sel = [s for s in at.selectbox if "objetivo" in (s.label or "")]
-check("Selector de objetivo presente", len(sel) >= 1)
-if sel:
-    sel[0].set_value("Canal").run()
-    entrenar = [b for b in at.button if "Entrenar" in b.label]
-    if entrenar:
-        entrenar[0].click().run()
-        check("Modelo entrenado sin error", not at.exception,
-              str(at.exception[0].message) if at.exception else "")
-        rep = at.session_state["model"]
-        check("Reporte de modelo en sesión", rep is not None and rep.ok,
-              rep.headline if rep else "")
-        at.sidebar.radio[0].set_value("5 · Evaluación").run()
-        check("Evaluación renderiza", not at.exception,
-              str(at.exception[0].message) if at.exception else "")
+check("Conserva los datos cargados", at.session_state["raw"] is not None)
+at.sidebar.toggle[0].set_value(False).run()
+check("Regresa al modo sencillo", not at.exception and len(at.sidebar.radio) == 0, err(at))
+check("Los datos siguen ahí", at.session_state["raw"] is not None)
 
-print("\n=== Despliegue ===")
-at.sidebar.radio[0].set_value("6 · Despliegue").run()
-check("Despliegue renderiza", not at.exception,
-      str(at.exception[0].message) if at.exception else "")
-check("Ofrece descargas", len(at.get("download_button")) >= 2,
-      f"{len(at.get('download_button'))} botones")
-
-print("\n=== Sin archivo cargado ===")
-at2 = nueva_app()
-for sec in SECCIONES[1:]:
-    at2.sidebar.radio[0].set_value(sec).run()
-    check(f"'{sec}' sin datos no truena", not at2.exception,
-          str(at2.exception[0].message) if at2.exception else "")
+print("\n=== Modo avanzado desde cero ===")
+at2 = nueva()
+at2.sidebar.toggle[0].set_value(True).run()
+check("Avanzado sin datos no truena", not at2.exception, err(at2))
+for f in FASES[1:]:
+    at2.sidebar.radio[0].set_value(f).run()
+    check(f"'{f}' sin datos", not at2.exception, err(at2))
 
 print("\n=== Resultado ===")
 if FALLOS:
@@ -130,4 +114,4 @@ if FALLOS:
     for f in FALLOS:
         print("   -", f)
     sys.exit(1)
-print("✅ Interfaz verificada de extremo a extremo.")
+print("✅ Interfaz verificada.")

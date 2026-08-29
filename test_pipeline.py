@@ -9,11 +9,17 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from core import deployment, insights as ins_mod, kpis as kpi_mod, loader, prep, profiling, quality
-from core.demo import build_demo
-from core.modeling import run_anomalies, run_clustering, run_forecast, run_supervised
+import deployment
+import insights as ins_mod
+import kpis as kpi_mod
+import loader
+import prep
+import profiling
+import quality
+from demo import build_demo
+from modeling import run_anomalies, run_clustering, run_forecast, run_supervised
 
 FALLOS: list[str] = []
 
@@ -42,6 +48,32 @@ r2 = loader.load_bytes(sucio.encode("latin-1"), "raro.csv")
 check("Encabezado desplazado detectado", list(r2.df.columns) == ["Fecha", "Región", "Monto"],
       str(list(r2.df.columns)))
 check("Separador ';' detectado", r2.separator == ";", repr(r2.separator))
+
+# Excel viejo (.xls) — requiere xlrd
+try:
+    import xlwt
+    _wb = xlwt.Workbook(); _ws = _wb.add_sheet("Ventas")
+    for _r, _fila in enumerate([["Fecha", "Canal", "Importe"],
+                                ["01/03/2024", "Mayoreo", 1500.5],
+                                ["02/03/2024", "Menudeo", 320.0]]):
+        for _c, _v in enumerate(_fila):
+            _ws.write(_r, _c, _v)
+    _b = io.BytesIO(); _wb.save(_b)
+    _r_xls = loader.load_bytes(_b.getvalue(), "viejo.xls")
+    check("Lee Excel viejo (.xls)", _r_xls.df.shape == (2, 3), str(_r_xls.df.shape))
+except ImportError:
+    check("Lee Excel viejo (.xls)", False, "falta xlrd o xlwt en el entorno")
+
+# mensajes de error en lenguaje llano
+_q, _c = loader.mensaje_amigable(ImportError("Import xlrd failed. Install xlrd >= 2.0.1"), "v.xls")
+check("Traduce el error de .xls", "Excel 97-2003" in _q and "Guardar como" in _c, _q[:50])
+_q2, _ = loader.mensaje_amigable(MemoryError("Unable to allocate"), "g.xlsx")
+check("Traduce el error de memoria", "demasiado grande" in _q2)
+_q3, _c3 = loader.mensaje_amigable(RuntimeError("algo inesperado"), "x.csv")
+check("Error desconocido da una salida útil", "xlsx" in _c3 or "CSV" in _c3)
+check("Ningún mensaje expone jerga de Python",
+      all("Traceback" not in t and "ImportError:" not in t
+          for t in (_q, _c, _q2, _q3, _c3)))
 
 # Excel con hoja
 buf = io.BytesIO()
@@ -171,6 +203,48 @@ check("Detecta concentración",
       any("concentración" in h.title.lower() or "cola larga" in h.title.lower() for h in hall))
 resumen = ins_mod.executive_summary(hall, profiling.dataset_overview(clean, p2), s2)
 check("Resumen ejecutivo generado", len(resumen) > 60)
+
+# ---------------------------------------------------------------- explicaciones
+seccion("Explicación de gráficas")
+import explicaciones as expl  # noqa: E402
+from utils import to_datetime_series, to_numeric_series  # noqa: E402
+
+_f = to_datetime_series(clean["Fecha"])
+_d = clean.assign(_f=_f, _v=to_numeric_series(clean["Importe"]))[ins_mod.robust_date_mask(_f)]
+_serie = _d.set_index("_f")["_v"].resample("ME").sum()
+if _serie.index[-1] > _d["_f"].max():
+    _serie = _serie.iloc[:-1]
+
+_lect = expl.leer_serie(_serie, "ME", "mes", "Importe", "$")
+check("Lee la serie de tiempo", "Cómo leerla" in _lect and "mejor mes" in _lect, _lect[:70])
+check("Nombra el mejor y el peor mes", _lect.count("de 20") >= 2)
+
+_at = expl.atipicos_serie(_serie, clean, "Fecha", "Importe", mapping, "ME", "mes", "$")
+print("  atípicos detectados:", len(_at))
+for _a in _at:
+    print("   ·", _a.replace("<br>", " | ")[:150])
+check("Detecta al menos un periodo atípico", len(_at) >= 1)
+check("Nombra el periodo en palabras",
+      any(m in _at[0].lower() for m in ("enero", "febrero", "marzo", "abril", "mayo", "junio",
+                                        "julio", "agosto", "septiembre", "octubre",
+                                        "noviembre", "diciembre")) if _at else False)
+check("Da al menos una pista del origen", "<br>" in _at[0] if _at else False)
+
+# una serie perfectamente plana no debe inventar atípicos
+_plana = pd.Series([100.0] * 24,
+                   index=pd.date_range("2024-01-31", periods=24, freq="ME"))
+check("No inventa atípicos en una serie plana",
+      expl.atipicos_serie(_plana, clean, "Fecha", "Importe", mapping, "ME", "mes") == [])
+
+_agg = (clean.assign(_v=to_numeric_series(clean["Importe"]))
+        .groupby("Canal")["_v"].sum().sort_values(ascending=False))
+_lr = expl.leer_ranking(_agg, "Canal", "Importe", "$")
+check("Lee el ranking", "encabeza" in _lr and "Menudeo" in _lr, _lr[:70])
+check("Todas las formas tienen texto de lectura",
+      all(expl.como_leer(t) for t in ("hist", "box", "scatter", "bar", "line")))
+check("Series muy cortas no truenan",
+      expl.leer_serie(pd.Series([1.0], index=pd.date_range("2024-01-31", periods=1, freq="ME")),
+                      "ME", "mes", "X") == "")
 
 # ---------------------------------------------------------------- modelado
 seccion("4·5 · Modelado y evaluación")

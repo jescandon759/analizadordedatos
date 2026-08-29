@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from .utils import has_mojibake
+from utils import has_mojibake
 
 EXTENSIONS = [".csv", ".tsv", ".txt", ".xlsx", ".xlsm", ".xls"]
 ENCODINGS = ["utf-8-sig", "utf-8", "cp1252", "latin-1"]
@@ -168,3 +168,59 @@ def load_bytes(
 def load_uploaded(uploaded, **kwargs) -> LoadResult:
     """Acepta un UploadedFile de Streamlit."""
     return load_bytes(uploaded.getvalue(), uploaded.name, **kwargs)
+
+
+# ---------------------------------------------------------------- errores
+
+
+def mensaje_amigable(exc: Exception, filename: str = "") -> tuple[str, str]:
+    """Traduce el error técnico a (qué pasó, qué hacer).
+
+    Un ImportError de una librería de Excel no le dice nada a quien solo quiere
+    ver sus ventas; lo que necesita es saber que puede guardar el archivo como
+    .xlsx y volver a intentar.
+    """
+    texto = str(exc).lower()
+    ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
+
+    if isinstance(exc, ImportError) or "import" in texto:
+        if "xlrd" in texto or ext == "xls":
+            return ("Tu archivo está en el formato viejo de Excel (.xls, de Excel 97-2003) "
+                    "y a esta instalación le falta el complemento para leerlo.",
+                    "La solución rápida: ábrelo en Excel y usa **Archivo → Guardar como → "
+                    "Libro de Excel (.xlsx)**. También puede resolverse agregando `xlrd` al "
+                    "archivo `requirements.txt` de la app.")
+        if "openpyxl" in texto:
+            return ("A esta instalación le falta el complemento para leer archivos de Excel.",
+                    "Agrega `openpyxl` al archivo `requirements.txt` de la app, o guarda tu "
+                    "archivo como CSV.")
+        return ("A esta instalación le falta un complemento para leer este tipo de archivo.",
+                "Guarda tu archivo como **.xlsx** o **.csv** y vuelve a intentar.")
+
+    if isinstance(exc, MemoryError) or "memory" in texto:
+        return ("El archivo es demasiado grande para la memoria disponible.",
+                "Divídelo en partes, o quédate solo con las columnas y el periodo que "
+                "necesitas analizar.")
+
+    if isinstance(exc, UnicodeDecodeError) or "codec" in texto or "decode" in texto:
+        return ("No pudimos interpretar el texto del archivo: viene en una codificación "
+                "que no reconocimos.",
+                "Ábrelo en Excel y guárdalo de nuevo como **CSV UTF-8** o como **.xlsx**.")
+
+    if "no columns to parse" in texto or "empty" in texto:
+        return ("El archivo no tiene datos que podamos leer: llegó vacío o sin columnas.",
+                "Revisa que el archivo tenga una tabla con encabezados en la primera fila.")
+
+    if "tokenizing" in texto or "expected" in texto and "fields" in texto:
+        return ("El archivo no tiene una estructura de tabla pareja: unas filas traen más "
+                "columnas que otras.",
+                "Ábrelo en Excel, revisa que todas las filas tengan las mismas columnas y "
+                "guárdalo como **.xlsx**.")
+
+    if "password" in texto or "encrypted" in texto:
+        return ("El archivo está protegido con contraseña.",
+                "Ábrelo, quítale la protección y vuelve a guardarlo.")
+
+    return (f"No pudimos leer el archivo ({type(exc).__name__}).",
+            "Prueba guardándolo como **.xlsx** o **CSV UTF-8**. Si es un Excel con varias "
+            "hojas o con títulos arriba de la tabla, usa el modo avanzado del menú lateral.")

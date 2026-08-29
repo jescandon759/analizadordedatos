@@ -199,7 +199,19 @@ def box_by_group(df: pd.DataFrame, group: str, value: str, title: str = "",
             marker=dict(color=pal[i % len(pal)]), line=dict(width=2),
             boxpoints=False,
         ))
-    return _layout(fig, title, value, "", legend=False, height=height)
+    fig = _layout(fig, title, value, "", legend=False, height=height)
+    # sin acotar el eje, un solo valor extremo aplasta todas las cajas hasta
+    # volverlas rayas: se recorta la vista al rango donde vive la mayoría
+    q = d.groupby(group)[value].quantile([0.25, 0.75]).unstack()
+    if not q.empty and q.notna().all().all():
+        iqr = float((q[0.75] - q[0.25]).median())
+        if iqr > 0:
+            lo = float(q[0.25].min()) - 1.8 * iqr
+            hi = float(q[0.75].max()) + 1.8 * iqr
+            real_lo, real_hi = float(d[value].min()), float(d[value].max())
+            fig.update_yaxes(range=[max(lo, real_lo - 0.02 * abs(real_lo)),
+                                    min(hi, real_hi)])
+    return fig
 
 
 def heatmap_corr(corr: pd.DataFrame, title: str = "", height: int = 420) -> go.Figure:

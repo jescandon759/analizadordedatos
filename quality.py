@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from .profiling import ColumnProfile, EMAIL_RE, PHONE_RE
-from .utils import (
+from profiling import ColumnProfile, EMAIL_RE, PHONE_RE
+from utils import (
     fmt_num,
     has_mojibake,
     is_numeric,

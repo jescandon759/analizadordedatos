@@ -7,7 +7,7 @@ from dataclasses import dataclass, field, asdict
 import numpy as np
 import pandas as pd
 
-from .utils import (
+from utils import (
     datetime_convertible_ratio,
     is_bool,
     is_datetime,
@@ -216,12 +216,20 @@ def columns_by_role(profiles: dict[str, ColumnProfile], *roles: str) -> list[str
 
 
 def suggest_metric_columns(profiles: dict[str, ColumnProfile]) -> list[str]:
-    """Columnas numéricas que tienen sentido sumar (excluye ids y años)."""
+    """Columnas numéricas que tienen sentido sumar (excluye ids y folios).
+
+    Ojo: una columna de importes con decimales tiene casi todos sus valores
+    distintos, igual que un folio. Lo que los separa es que el folio es entero
+    y no tiene rol de negocio.
+    """
     out = []
     for p in profiles.values():
         if p.semantic != "numerico" or p.role == "identificador":
             continue
-        if p.unique_ratio > 0.99 and p.n > 50:
+        rango = float(p.stats.get("max", 0)) - float(p.stats.get("min", 0)) + 1
+        consecutiva = 0 < rango <= p.n_unique * 1.2          # firma de un folio
+        if (p.unique_ratio > 0.99 and p.n > 50 and consecutiva
+                and p.role not in ("monetario", "cantidad", "porcentaje")):
             continue
         out.append(p.name)
     # las monetarias y de cantidad primero

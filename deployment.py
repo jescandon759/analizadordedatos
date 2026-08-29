@@ -9,7 +9,7 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from .utils import fmt_num, fmt_pct
+from utils import fmt_num, fmt_pct
 
 APP_VERSION = "1.0"
 

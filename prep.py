@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from .utils import (
+from utils import (
     fix_mojibake,
     is_numeric,
     norm_key,
