@@ -102,7 +102,7 @@ def resumen(insights, overview, score) -> str:
     partes = [f"Revisamos **{overview['filas']:,} registros** y "
               f"**{overview['columnas']} columnas**."]
     if oport:
-        partes.append(f"Lo mejor que encontramos: **{oport[0].titulo_llano}**.")
+        partes.append(f"Lo que más se puede aprovechar: **{oport[0].titulo_llano}**.")
     if riesgos:
         partes.append(f"Lo que más urge atender: **{riesgos[0].titulo_llano}**.")
     if not riesgos and not oport:

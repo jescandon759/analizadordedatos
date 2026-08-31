@@ -81,6 +81,10 @@ def _candidate_key_duplicates(df: pd.DataFrame, profiles, out: list[Issue]) -> N
     for p in profiles.values():
         if p.semantic != "identificador" and p.role != "identificador":
             continue
+        # un SKU o una clave de categoría se repite por diseño; solo es un
+        # problema cuando la columna casi es única y unos pocos valores se salen
+        if p.unique_ratio < 0.9:
+            continue
         s = df[p.name].dropna()
         if len(s) < 10:
             continue
@@ -237,6 +241,10 @@ def _text_hygiene(df: pd.DataFrame, profiles, out: list[Issue]) -> None:
 def _numeric_sanity(df: pd.DataFrame, profiles, out: list[Issue]) -> None:
     for p in profiles.values():
         if p.semantic != "numerico" or not p.stats:
+            continue
+        # un SKU "extremo" o un folio "sesgado" no significan nada: son etiquetas
+        # que resultan ser números, no cantidades
+        if p.role == "identificador":
             continue
         vals = to_numeric_series(df[p.name]).dropna()
         if vals.empty:

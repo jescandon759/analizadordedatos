@@ -137,6 +137,30 @@ print("  mapeo:", {k: v for k, v in mapping.items() if v})
 check("Detecta la fecha", mapping["fecha"] == "Fecha", str(mapping["fecha"]))
 check("Detecta el importe", mapping["ingreso"] == "Importe", str(mapping["ingreso"]))
 check("Detecta el estatus", mapping["estatus"] == "Estatus", str(mapping["estatus"]))
+check("El folio sí califica como transacción", mapping["transaccion"] == "Folio",
+      str(mapping["transaccion"]))
+
+# un SKU se repite por diseño: no es folio ni "identificador repetido"
+_rng = np.random.default_rng(4)
+_sku = pd.DataFrame({
+    "Fecha": pd.to_datetime(_rng.choice(pd.date_range("2024-01-01", "2025-08-15"), 4000)),
+    "Id_es_SKUIDx": np.minimum(_rng.zipf(1.22, 4000), 2700).astype(float),
+    "Sucursal": _rng.choice(list("ABCDE"), 4000),
+    "Importe": np.abs(_rng.lognormal(6, 1, 4000)).round(2)})
+_p_sku = profiling.profile_dataframe(_sku)
+_m_sku = kpi_mod.suggest_mapping(_p_sku)
+check("Un SKU repetido no se toma como folio", _m_sku["transaccion"] is None,
+      str(_m_sku["transaccion"]))
+check("Un SKU repetido no se reporta como clave duplicada",
+      "id_duplicado" not in {i.code for i in quality.detect_issues(_sku, _p_sku)})
+_h_sku = ins_mod.generate_insights(_sku, _p_sku, _m_sku, [])
+_conc = [h for h in _h_sku if "20%" in h.titulo_llano or "Dependes" in h.titulo_llano]
+check("Con muchos SKUs no dice que dependes de uno",
+      bool(_conc) and "Dependes" not in _conc[0].titulo_llano,
+      _conc[0].titulo_llano if _conc else "(sin hallazgo)")
+check("Los nombres de categoría salen sin el '.0'",
+      all(".0'" not in h.texto_llano for h in _h_sku),
+      next((h.texto_llano[:60] for h in _h_sku if ".0'" in h.texto_llano), "ok"))
 check("Segmento distinto de producto", mapping["segmento"] != mapping["producto"],
       f"{mapping['segmento']} vs {mapping['producto']}")
 check("Detecta el costo", mapping["costo"] == "Costo", str(mapping["costo"]))
@@ -311,6 +335,51 @@ except ValueError:
 xlsx = deployment.to_excel_bytes({"Datos": clean.head(100),
                                   "Problemas": quality.issues_table(i2)})
 check("Excel generado", len(xlsx) > 5000, f"{len(xlsx)/1024:.0f} KB")
+
+# --- Excel limpio para el usuario final
+_kpis_df = pd.DataFrame([{"KPI": k.name, "Valor": k.display("$")} for k in cat])
+_hall_df = pd.DataFrame([{"Hallazgo": h.titulo_llano, "Detalle": h.texto_llano} for h in hall])
+_prob_df = pd.DataFrame([{"Severidad": i.severity, "Qué pasa": i.title} for i in i2])
+_xl, _av = deployment.build_excel(
+    clean, source="ventas.csv", confianza="Media — revisa los detalles",
+    resumen=resumen, prep_log=log, problemas=_prob_df, kpis=_kpis_df, hallazgos=_hall_df)
+check("Excel limpio generado", len(_xl) > 8000, f"{len(_xl)/1024:.0f} KB")
+_req = Path(__file__).resolve().parent / "requirements.txt"
+_reqs = _req.read_text().lower() if _req.exists() else ""
+for _pkg in ("xlsxwriter", "xlrd", "openpyxl", "streamlit", "plotly", "scikit-learn",
+             "scipy", "statsmodels", "pandas", "numpy", "joblib"):
+    check(f"requirements.txt declara {_pkg}", _pkg in _reqs)
+Path("/tmp/datos_limpios.xlsx").write_bytes(_xl)
+_hojas = pd.ExcelFile(io.BytesIO(_xl)).sheet_names
+check("Trae las cuatro hojas",
+      _hojas == ["Resumen", "Datos limpios", "Qué corregimos", "Qué revisar"], str(_hojas))
+_leido = pd.read_excel(io.BytesIO(_xl), sheet_name="Datos limpios")
+check("Los datos del Excel cuadran con los limpios",
+      len(_leido) == len(clean) and list(_leido.columns) == list(clean.columns),
+      f"{_leido.shape} vs {clean.shape}")
+check("El Excel trae los importes ya numéricos",
+      pd.api.types.is_numeric_dtype(_leido["Importe"]), str(_leido["Importe"].dtype))
+check("El Excel trae las fechas como fecha",
+      pd.api.types.is_datetime64_any_dtype(_leido["Fecha"]), str(_leido["Fecha"].dtype))
+check("Sin aviso de recorte con este tamaño", _av == [], str(_av))
+_xl2, _av2 = deployment.build_excel(
+    clean, source="x", confianza="c", resumen="r", prep_log=log,
+    problemas=_prob_df, kpis=_kpis_df, hallazgos=_hall_df, max_filas=50)
+check("Avisa cuando recorta filas", len(_av2) == 1 and "primeras 50" in _av2[0],
+      str(_av2)[:60])
+
+# --- gráficas: el bug del eje numérico
+import charts  # noqa: E402
+_f = charts.bar_ranked(["4088.0", "3211.0", "5502.0"], [430000, 240000, 215000])
+check("Eje de categorías forzado", _f.layout.yaxis.type == "category", str(_f.layout.yaxis.type))
+check("Etiquetas de ID sin el '.0'", _f.layout.yaxis.categoryarray == ("5502", "3211", "4088"),
+      str(_f.layout.yaxis.categoryarray))
+check("Cada barra trae su cifra escrita", len(_f.data[0].text) == 3, str(_f.data[0].text))
+_lab, _val, _resto = charts.top_con_otros(
+    pd.Series(range(1, 101), index=[f"SKU{i}" for i in range(100)]), 8)
+check("Agrupa la cola en 'Otros'", _lab[-1].startswith("Otros (93"), _lab[-1])
+check("'Otros' suma la cola completa",
+      abs(sum(_val) - sum(range(1, 101))) < 1e-6, f"{sum(_val)}")
 
 html = deployment.build_html_report(
     source="ventas.csv", overview=profiling.dataset_overview(clean, p2), score=s2, counts=counts,

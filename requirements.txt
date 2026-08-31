@@ -6,5 +6,6 @@ scikit-learn>=1.4
 scipy>=1.11
 statsmodels>=0.14
 openpyxl>=3.1
+xlsxwriter>=3.1
 xlrd>=2.0.1
 joblib>=1.3

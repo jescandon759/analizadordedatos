@@ -51,7 +51,9 @@ Se abre en `http://localhost:8501`. Sin datos a la mano, el botón
    promedio, hacia dónde va) y, si hay valores fuera de lo normal, cuál es, qué tan
    lejos está de lo normal y **de dónde salió**.
 8. **¿Interpretamos bien tus columnas?** — por si la detección automática falló.
-9. **Llévatelo** — reporte HTML y datos corregidos en CSV.
+9. **Llévatelo** — tres descargas: **Excel limpio** (cuatro hojas: Resumen, Datos
+   limpios con filtros ya puestos, Qué corregimos y Qué revisar), reporte HTML y
+   CSV para archivos muy grandes.
 
 ---
 
@@ -211,6 +213,24 @@ python test_ui.py
 ```
 
 ---
+
+## Cómo se mantienen legibles las gráficas
+
+- **Eje de categorías forzado.** Sin `type="category"`, unas etiquetas que parecen
+  números (IDs de SKU, folios) hacen que Plotly use una escala continua y las
+  barras salgan como hilos. Fue un bug real, encontrado mirando la app.
+- **Cada barra trae su cifra escrita al lado**: no hay que leer el eje.
+- **La cola se agrupa en una barra «Otros (N)»** en lugar de cortarse en silencio,
+  para que las barras sigan sumando el total.
+- **Los IDs numéricos se imprimen sin el `.0`** que les pega pandas.
+- **El box plot recorta la vista** al rango donde viven las cajas, y lo dice.
+
+## Los identificadores no se tratan como cantidades
+
+Un SKU o una clave de categoría es una etiqueta que resulta ser un número. La app
+no le calcula valores extremos ni sesgo, no lo propone como folio de transacción
+(eso exige que casi todos sus valores sean distintos) y no reporta "clave
+repetida" cuando repetirse es justo su función.
 
 ## Formatos y errores de lectura
 

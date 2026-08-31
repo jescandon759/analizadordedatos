@@ -12,7 +12,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from utils import fmt_num, fmt_pct, safe_div, to_datetime_series, to_numeric_series
+from utils import (etiqueta, fmt_num, fmt_pct, safe_div, to_datetime_series,
+                   to_numeric_series)
 
 OPORTUNIDAD, RIESGO, HALLAZGO, CONTEXTO = "oportunidad", "riesgo", "hallazgo", "contexto"
 ICON = {OPORTUNIDAD: "▲", RIESGO: "▼", HALLAZGO: "◆", CONTEXTO: "●"}
@@ -293,8 +294,11 @@ def _r_concentracion(df, mapping, profiles, out: list[Insight]) -> None:
         top1 = float(agg.iloc[0] / agg.sum())
 
         if share20 >= 0.7:
+            # con muchos elementos, "el 20% hace el 72%" es Pareto normal, no
+            # dependencia de nadie: el titular tiene que distinguir los dos casos
+            depende_de_uno = top1 > 0.3
             out.append(Insight(
-                RIESGO if top1 > 0.3 else HALLAZGO,
+                RIESGO if depende_de_uno else HALLAZGO,
                 f"Concentración fuerte en '{dim}'",
                 f"El 20% superior ({k20} de {len(agg)}) genera {fmt_pct(share20)} {unidad}. "
                 f"El primero solo, '{agg.index[0]}', aporta {fmt_pct(top1)}. "
@@ -302,17 +306,22 @@ def _r_concentracion(df, mapping, profiles, out: list[Insight]) -> None:
                    if top1 > 0.3 else "Clásico patrón de Pareto: enfoca ahí el esfuerzo comercial."),
                 impact=min(0.9, 0.5 + share20 * 0.4 + top1),
                 evidence={"share_top20": share20, "top1": str(agg.index[0]), "share_top1": top1},
-                chart={"type": "bar", "labels": [str(i) for i in agg.head(10).index],
+                chart={"type": "bar", "labels": [etiqueta(i) for i in agg.head(10).index],
                        "values": list(agg.head(10).values),
                        "title": f"Top 10 de '{dim}' por {medida}", "highlight": k20},
-                titulo_simple=f"Casi todo depende de unos pocos ({dim})",
-                simple=(f"{k20} de {len(agg)} generan {fmt_pct(share20)} del total. "
-                        f"'{agg.index[0]}' por sí solo aporta {fmt_pct(top1)}. "
-                        + ("Eso es riesgoso: si ese se va, se cae buena parte del negocio. "
-                           "Vale la pena cuidarlo mucho y, en paralelo, buscar diversificar."
-                           if top1 > 0.3 else
-                           "Es el patrón normal 80/20: ahí es donde conviene poner el esfuerzo "
-                           "comercial.")),
+                titulo_simple=(f"Dependes demasiado de '{etiqueta(agg.index[0])}'" if depende_de_uno
+                               else f"El 20% de '{dim}' genera el {fmt_pct(share20)}"),
+                simple=(
+                    (f"'{etiqueta(agg.index[0])}' por sí solo aporta {fmt_pct(top1)} del total, y entre "
+                     f"los {k20} más grandes juntan {fmt_pct(share20)}. Eso es riesgoso: si ese "
+                     "se va, se cae buena parte del negocio. Vale la pena cuidarlo mucho y, en "
+                     "paralelo, buscar diversificar.")
+                    if depende_de_uno else
+                    (f"{k20} de {len(agg):,} valores de '{dim}' generan {fmt_pct(share20)} del "
+                     f"total. Ninguno manda por sí solo — el más grande es apenas "
+                     f"{fmt_pct(top1)} — así que no hay dependencia de nadie en particular. "
+                     "Es el patrón 80/20 de siempre: ese grupo es donde rinde más el esfuerzo "
+                     "comercial.")),
             ))
 
         cola = agg[agg.cumsum() / agg.sum() > 0.95]

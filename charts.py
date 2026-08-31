@@ -10,6 +10,8 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
+from utils import etiqueta, fmt_num
+
 try:  # detección de tema; la app siempre corre en Streamlit
     import streamlit as st
 except Exception:  # pragma: no cover
@@ -77,6 +79,21 @@ def _layout(fig: go.Figure, title: str = "", ylab: str = "", xlab: str = "",
     return fig
 
 
+def top_con_otros(serie: pd.Series, n: int = 8, etiqueta_resto: str = "Otros"):
+    """Top n de una serie agregada; el resto se suma en una barra 'Otros (N)'.
+
+    Cortar la cola en silencio hace que las barras no sumen el total y el lector
+    saque conclusiones equivocadas: mejor mostrarla agrupada.
+    """
+    s = serie.dropna().sort_values(ascending=False)
+    if len(s) <= n:
+        return [etiqueta(i) for i in s.index], list(s.values), 0
+    cabeza, resto = s.iloc[:n - 1], s.iloc[n - 1:]
+    labels = [etiqueta(i) for i in cabeza.index] + [f"{etiqueta_resto} ({len(resto):,})"]
+    values = list(cabeza.values) + [float(resto.sum())]
+    return labels, values, len(resto)
+
+
 def _fold_other(s: pd.Series, top: int = MAX_CATEGORIES, label: str = "Otros") -> pd.Series:
     if s.nunique() <= top:
         return s
@@ -122,30 +139,52 @@ def _alpha(hexcolor: str, a: float) -> str:
 
 
 def bar_ranked(labels, values, title: str = "", xlab: str = "", horizontal: bool = True,
-               highlight: int = 0, height: int = 360, value_fmt: str = ",.2f") -> go.Figure:
-    """Ranking. Un solo color: el eje ya distingue las categorías."""
+               highlight: int = 0, height: int = 360, value_fmt: str = ",.2f",
+               etiquetas_valor: bool = True, prefijo: str = "") -> go.Figure:
+    """Ranking. Un solo color: el eje ya distingue las categorías.
+
+    El eje de categorías se declara `type="category"` a la fuerza. Si no, unas
+    etiquetas que parecen números (IDs de producto, folios) hacen que Plotly use
+    una escala continua y las barras salgan como hilos en posiciones absurdas.
+    """
     pal = palette()
     base = pal[0]
+    etq = [etiqueta(l) for l in labels]
+    vals = [float(v) for v in values]
     colors = [base if (highlight == 0 or i < highlight) else _alpha(base, 0.45)
-              for i in range(len(labels))]
+              for i in range(len(etq))]
+    _, secondary, _ = _ink()
+    texto = [f"{prefijo}{fmt_num(v)}" for v in vals] if etiquetas_valor else None
+    alto = max(height, 34 * len(etq) + 70) if horizontal else height
+
     fig = go.Figure()
     if horizontal:
         fig.add_trace(go.Bar(
-            y=[str(l) for l in labels][::-1], x=list(values)[::-1], orientation="h",
+            y=etq[::-1], x=vals[::-1], orientation="h",
             marker=dict(color=colors[::-1], line=dict(width=0)),
+            text=(texto[::-1] if texto else None), textposition="outside",
+            textfont=dict(color=secondary, size=11), cliponaxis=False,
             hovertemplate="<b>%{y}</b>: %{x:" + value_fmt + "}<extra></extra>",
         ))
-        fig = _layout(fig, title, "", xlab, height=height)
-        fig.update_traces(marker_cornerradius=4)
+        fig = _layout(fig, title, "", xlab, height=alto)
+        fig.update_yaxes(type="category", categoryorder="array",
+                         categoryarray=etq[::-1], showgrid=False)
+        if vals:
+            fig.update_xaxes(range=[0, max(vals) * (1.22 if etiquetas_valor else 1.02)])
     else:
         fig.add_trace(go.Bar(
-            x=[str(l) for l in labels], y=list(values),
+            x=etq, y=vals,
             marker=dict(color=colors, line=dict(width=0)),
+            text=texto, textposition="outside",
+            textfont=dict(color=secondary, size=11), cliponaxis=False,
             hovertemplate="<b>%{x}</b>: %{y:" + value_fmt + "}<extra></extra>",
         ))
         fig = _layout(fig, title, xlab, "", height=height)
-        fig.update_traces(marker_cornerradius=4)
-    fig.update_layout(bargap=0.25, hovermode="closest")
+        fig.update_xaxes(type="category", categoryorder="array", categoryarray=etq)
+        if vals:
+            fig.update_yaxes(range=[0, max(vals) * (1.18 if etiquetas_valor else 1.02)])
+    fig.update_traces(marker_cornerradius=4)
+    fig.update_layout(bargap=0.32 if len(etq) > 3 else 0.55, hovermode="closest")
     return fig
 
 
@@ -165,7 +204,8 @@ def bar_grouped_time(df: pd.DataFrame, x: str, y: str, color: str,
             hovertemplate=f"<b>{cat}</b>: %{{y:,.2f}}<extra></extra>",
         ))
     fig.update_layout(barmode="stack", bargap=0.25)
-    return _layout(fig, title, ylab, "", legend=len(order) >= 2, height=height)
+    fig = _layout(fig, title, ylab, "", legend=len(order) >= 2, height=height)
+    return fig
 
 
 def histogram(values, title: str = "", xlab: str = "", height: int = 300,
@@ -200,6 +240,7 @@ def box_by_group(df: pd.DataFrame, group: str, value: str, title: str = "",
             boxpoints=False,
         ))
     fig = _layout(fig, title, value, "", legend=False, height=height)
+    fig.update_xaxes(type="category")
     # sin acotar el eje, un solo valor extremo aplasta todas las cajas hasta
     # volverlas rayas: se recorta la vista al rango donde vive la mayoría
     q = d.groupby(group)[value].quantile([0.25, 0.75]).unstack()

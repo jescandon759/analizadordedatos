@@ -164,8 +164,9 @@ def _dibujar(spec, df, key):
                                    "x", "y", title="", height=240)
         elif t == "bar":
             fig = charts.bar_ranked(spec["labels"], spec["values"], "",
-                                    horizontal=len(spec["labels"]) > 7,
-                                    highlight=spec.get("highlight", 0), height=260)
+                                    horizontal=len(spec["labels"]) > 5,
+                                    highlight=spec.get("highlight", 0), height=260,
+                                    prefijo=spec.get("prefijo", ""))
         elif t == "box":
             d = df[[spec["dim"], spec["value"]]].copy()
             d[spec["value"]] = to_numeric_series(d[spec["value"]])
@@ -238,12 +239,14 @@ def _bloque_graficas(df, profiles, mapping):
         dim = dim_cols[0] if dim_cols else None
     if dim:
         agg = (df.assign(_v=to_numeric_series(df[metrica])).groupby(dim)["_v"].sum()
-                 .sort_values(ascending=False).head(8))
+                 .sort_values(ascending=False))
         if len(agg) > 1:
+            etq, vals, n_resto = charts.top_con_otros(agg, 8)
             hechas.append((
                 f"{metrica} por {dim.lower()}",
-                charts.bar_ranked(agg.index, agg.values, "", metrica, height=300),
-                expl.leer_ranking(agg, dim, metrica, moneda),
+                charts.bar_ranked(etq, vals, "", metrica, height=300,
+                                  prefijo=moneda or ""),
+                expl.leer_ranking(agg, dim, metrica, moneda, n_resto),
                 expl.atipicos_ranking(agg, dim, moneda)))
 
     if not hechas:
@@ -325,26 +328,65 @@ def _bloque_columnas(df, profiles, mapping):
             st.rerun()
 
 
+@st.cache_data(show_spinner=False, max_entries=3)
+def _armar_excel(df, source, confianza, resumen, prep_log, problemas, kpis, hallazgos):
+    return deployment.build_excel(
+        df, source=source, confianza=confianza, resumen=resumen, prep_log=prep_log,
+        problemas=problemas, kpis=kpis, hallazgos=hallazgos)
+
+
 def _bloque_descargas(df, profiles, issues, score, counts, hallazgos, mapping, overview):
     st.markdown("### Llévatelo")
-    c1, c2 = st.columns(2)
     catalogo = kpi_mod.compute_catalog(df, mapping)
     propios, _ = kpi_mod.compute_custom(df, st.session_state.custom)
+    kpis_mostrar = textos.ordenar_kpis(catalogo, 8) + propios
+    moneda = st.session_state.currency
+    nivel, _, _, frase = estado.confianza(score, counts)
+    resumen_txt = textos.resumen(hallazgos, overview, score).replace("**", "")
+
+    kpis_df = pd.DataFrame([{"KPI": k.name, "Valor": k.display(moneda)}
+                            for k in kpis_mostrar])
+    hall_df = pd.DataFrame([{"Hallazgo": h.titulo_llano,
+                             "Detalle": h.texto_llano.replace("**", "")}
+                            for h in hallazgos])
+    prob_df = pd.DataFrame([
+        {"Severidad": {"crítico": "Revisar ya", "advertencia": "Revisar"}.get(i.severity, "Aviso"),
+         "Qué pasa": textos.explicar(i).replace("**", "")}
+        for i in issues])
+
+    with st.spinner("Preparando tu Excel…"):
+        try:
+            excel, avisos = _armar_excel(
+                df, st.session_state.source, f"{nivel} — {frase}", resumen_txt,
+                st.session_state.prep_log, prob_df, kpis_df, hall_df)
+        except Exception as e:  # noqa: BLE001
+            excel, avisos = None, [f"No se pudo generar el Excel ({type(e).__name__})."]
+
+    c1, c2, c3 = st.columns(3)
+    if excel is not None:
+        c1.download_button("📗 Descargar Excel limpio", excel,
+                           "datos_limpios.xlsx",
+                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           use_container_width=True, type="primary",
+                           help="Tus datos ya corregidos, más una hoja con todo lo que "
+                                "corregimos y otra con lo que falta revisar.")
     html = deployment.build_html_report(
         source=st.session_state.source, overview=overview, score=score, counts=counts,
-        kpis=textos.ordenar_kpis(catalogo, 8) + propios, insights=hallazgos,
+        kpis=kpis_mostrar, insights=hallazgos,
         issues_df=quality.issues_table(issues),
         profile_df=profiling.profiles_table(profiles),
         prep_log=st.session_state.prep_log, model_report=st.session_state.model,
-        summary=textos.resumen(hallazgos, overview, score),
-        currency=st.session_state.currency)
-    c1.download_button("📄 Descargar el reporte completo", html.encode("utf-8"),
+        summary=textos.resumen(hallazgos, overview, score), currency=moneda)
+    c2.download_button("📄 Reporte para leer o imprimir", html.encode("utf-8"),
                        "reporte.html", "text/html", use_container_width=True,
-                       type="primary",
-                       help="Un archivo que se abre en cualquier navegador y se puede imprimir.")
-    c2.download_button("📊 Descargar los datos corregidos", deployment.to_csv_bytes(df),
+                       help="Se abre en cualquier navegador.")
+    c3.download_button("📋 Datos en CSV", deployment.to_csv_bytes(df),
                        "datos_corregidos.csv", "text/csv", use_container_width=True,
-                       help="El mismo archivo, ya limpio, listo para Excel.")
+                       help="Todas las filas, sin formato. Útil si el archivo es enorme.")
+    for a in avisos:
+        st.caption(f"ℹ️ {a}")
+    st.caption("El Excel trae cuatro hojas: **Resumen**, **Datos limpios** (con filtros ya "
+               "puestos), **Qué corregimos** y **Qué revisar**.")
 
 
 # ------------------------------------------------------------------ render

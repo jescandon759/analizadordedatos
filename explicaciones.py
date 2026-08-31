@@ -15,7 +15,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from utils import fmt_num, fmt_pct, to_datetime_series, to_numeric_series
+from utils import etiqueta, fmt_num, fmt_pct, to_datetime_series, to_numeric_series
 
 DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
@@ -97,7 +97,7 @@ def _pistas_periodo(sub: pd.DataFrame, df: pd.DataFrame, valor_col: str | None,
             for slot in ("cliente", "producto", "segmento"):
                 col = mapping.get(slot)
                 if col and col in sub.columns and pd.notna(fila.get(col)):
-                    detalles.append(str(fila[col]))
+                    detalles.append(etiqueta(fila[col]))
             quien = f" ({', '.join(detalles[:2])})" if detalles else ""
             pistas.append(f"**Una sola operación de {_money(v.max(), moneda)}**{quien} "
                           f"explica el {fmt_pct(parte)} de todo el {etq}. "
@@ -140,7 +140,7 @@ def _pistas_periodo(sub: pd.DataFrame, df: pd.DataFrame, valor_col: str | None,
         sp, sg = en_periodo / en_periodo.sum(), global_ / global_.sum()
         cat = sp.idxmax()
         if sp[cat] >= 0.4 and sg.get(cat, 0) > 0 and sp[cat] >= sg[cat] * 1.5:
-            pistas.append(f"Se concentró en **{cat}**: {fmt_pct(sp[cat])} del {etq}, "
+            pistas.append(f"Se concentró en **{etiqueta(cat)}**: {fmt_pct(sp[cat])} del {etq}, "
                           f"cuando normalmente representa {fmt_pct(sg[cat])}.")
             break
 
@@ -203,22 +203,24 @@ def atipicos_serie(serie: pd.Series, df: pd.DataFrame, fecha_col: str,
 
 
 def leer_ranking(agg: pd.Series, dim: str, metrica: str,
-                 moneda: str | None = None) -> str:
-    a = agg.dropna()
+                 moneda: str | None = None, n_resto: int = 0) -> str:
+    a = agg.dropna().sort_values(ascending=False)
     if len(a) < 2:
         return ""
     total = float(a.sum())
     if total <= 0:
         return ""
-    primero = a.index[0]
+    primero = etiqueta(a.index[0])
     s1 = float(a.iloc[0]) / total
     dos = float(a.iloc[:2].sum()) / total
-    ultimo = a.index[-1]
+    cola = (f" La última barra, **Otros**, junta los {n_resto:,} valores restantes de "
+            f"«{dim}», que entre todos son {fmt_pct(1 - float(a.iloc[:7].sum()) / total)} "
+            "del total." if n_resto else "")
     return (f"**Cómo leerla:** cada barra es el total de {metrica} de un valor de "
-            f"«{dim}», de mayor a menor. **{primero}** encabeza con "
-            f"{_money(a.iloc[0], moneda)} ({fmt_pct(s1)} de lo que se ve aquí) y "
-            f"**{ultimo}** cierra con {_money(a.iloc[-1], moneda)}. "
-            f"Los dos primeros juntos son {fmt_pct(dos)}.")
+            f"«{dim}», de mayor a menor, con su cifra escrita al lado. "
+            f"**{primero}** encabeza con {_money(a.iloc[0], moneda)}, "
+            f"el {fmt_pct(s1)} del total. Los dos primeros juntos son "
+            f"{fmt_pct(dos)}.{cola}")
 
 
 def atipicos_ranking(agg: pd.Series, dim: str, moneda: str | None = None) -> list[str]:
@@ -230,7 +232,7 @@ def atipicos_ranking(agg: pd.Series, dim: str, moneda: str | None = None) -> lis
     if med <= 0:
         return []
     if float(a.iloc[0]) >= med * 3:
-        return [f"**{a.index[0]}** está muy por encima del resto: "
+        return [f"**{etiqueta(a.index[0])}** está muy por encima del resto: "
                 f"{float(a.iloc[0]) / med:.1f} veces la barra típica "
                 f"({_money(med, moneda)}). Si es correcto, ahí está tu concentración; "
                 "si no lo esperabas, revisa que no se estén agrupando dos cosas distintas "

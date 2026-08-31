@@ -54,8 +54,11 @@ check("Muestra el semáforo de confianza",
       any("Confianza en los datos" in m.value for m in at.markdown))
 check("Muestra hallazgos", any("Lo más importante" in m.value for m in at.markdown))
 check("Avisa qué corrigió", any("Corregimos" in s.value for s in at.success), )
-check("Ofrece descargas", len(at.get("download_button")) == 2,
-      f"{len(at.get('download_button'))}")
+botones = at.get("download_button")
+check("Ofrece las tres descargas", len(botones) == 3, f"{len(botones)}")
+check("La descarga principal es el Excel limpio",
+      any("Excel limpio" in b.label for b in botones),
+      str([b.label for b in botones]))
 check("Sigue sin fases a la vista", len(at.sidebar.radio) == 0)
 textos_md = " ".join(m.value for m in at.markdown)
 for jerga in ["ANOVA", "p-valor", "R²", "silueta", "desviaciones estándar", "baseline"]:

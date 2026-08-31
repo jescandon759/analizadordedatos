@@ -396,10 +396,13 @@ def suggest_mapping(profiles) -> dict[str, str | None]:
         if p.role:
             by_role.setdefault(p.role, []).append(p.name)
 
-    def first(role, semantics=None):
+    def first(role, semantics=None, min_unicos: float = 0.0):
         for c in by_role.get(role, []):
-            if semantics is None or profiles[c].semantic in semantics:
-                return c
+            if semantics is not None and profiles[c].semantic not in semantics:
+                continue
+            if profiles[c].unique_ratio < min_unicos:
+                continue
+            return c
         return None
 
     monetarias = [c for c in by_role.get("monetario", []) if profiles[c].semantic == "numerico"]
@@ -436,7 +439,7 @@ def suggest_mapping(profiles) -> dict[str, str | None]:
         "cantidad": first("cantidad", {"numerico"}),
         "cliente": cliente,
         "producto": producto,
-        "transaccion": first("identificador"),
+        "transaccion": first("identificador", min_unicos=0.9),
         "segmento": segmento,
         "estatus": estatus,
     }

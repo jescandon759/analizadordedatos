@@ -201,6 +201,22 @@ def fmt_num(value, decimals: int | None = None) -> str:
     return f"{sign}{a:,.4f}"
 
 
+def etiqueta(v) -> str:
+    """Nombre de categoría legible: 4088.0 -> '4088', NaN -> '(sin dato)'.
+
+    Los identificadores numéricos llegan de pandas como float y se imprimen con
+    un '.0' que no significa nada para quien lee.
+    """
+    if v is None or (isinstance(v, float) and np.isnan(v)):
+        return "(sin dato)"
+    if isinstance(v, (float, np.floating)) and float(v).is_integer():
+        return str(int(v))
+    s = str(v)
+    if s.endswith(".0") and s[:-2].lstrip("-").isdigit():
+        return s[:-2]
+    return s
+
+
 def fmt_pct(value, decimals: int = 1) -> str:
     if value is None or (isinstance(value, float) and np.isnan(value)):
         return "—"

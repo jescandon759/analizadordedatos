@@ -36,6 +36,146 @@ def to_excel_bytes(sheets: dict[str, pd.DataFrame]) -> bytes:
     return buf.getvalue()
 
 
+# ---------------------------------------------------------------- Excel limpio
+
+MAX_FILAS_EXCEL = 120_000   # arriba de esto el archivo tarda demasiado y come memoria
+
+
+def _ancho(serie: pd.Series, encabezado: str) -> int:
+    muestra = serie.head(300).astype(str)
+    largo = int(muestra.str.len().max()) if len(muestra) else 0
+    return max(10, min(42, max(largo, len(str(encabezado))) + 3))
+
+
+def build_excel(
+    df: pd.DataFrame, *, source: str, confianza: str, resumen: str,
+    prep_log: list[str], problemas: pd.DataFrame, kpis: pd.DataFrame,
+    hallazgos: pd.DataFrame, max_filas: int = MAX_FILAS_EXCEL,
+) -> tuple[bytes, list[str]]:
+    """Excel con los datos ya corregidos y las hojas que explican qué se hizo.
+
+    Devuelve (bytes, avisos). El archivo es el entregable principal para quien
+    solo quiere sus datos limpios y seguir trabajando en Excel.
+    """
+    avisos: list[str] = []
+    datos = df
+    if len(df) > max_filas:
+        datos = df.head(max_filas)
+        avisos.append(
+            f"El archivo tiene {len(df):,} filas y en Excel se incluyeron las primeras "
+            f"{max_filas:,} para que el archivo siga siendo manejable. Usa la descarga "
+            "en CSV si necesitas todo.")
+
+    try:
+        import xlsxwriter  # noqa: F401
+    except ImportError:
+        # sin xlsxwriter no hay formato, pero el usuario igual se lleva sus datos
+        hojas = {"Datos limpios": datos, "Qué corregimos":
+                 pd.DataFrame({"Transformación": [l for l in prep_log
+                                                  if not l.startswith("Resultado:")] or ["—"]}),
+                 "Qué revisar": problemas, "Tus números": kpis, "Hallazgos": hallazgos}
+        avisos.append("El Excel salió sin formato porque falta el paquete `xlsxwriter`; "
+                      "los datos están completos.")
+        return to_excel_bytes(hojas), avisos
+
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="xlsxwriter",
+                        datetime_format="yyyy-mm-dd", date_format="yyyy-mm-dd") as xw:
+        wb = xw.book
+        f_titulo = wb.add_format({"font_name": "Arial", "bold": True, "font_size": 15})
+        f_sub = wb.add_format({"font_name": "Arial", "font_size": 10, "font_color": "#52514E"})
+        f_head = wb.add_format({"font_name": "Arial", "bold": True, "font_size": 10,
+                                "bg_color": "#2A78D6", "font_color": "white",
+                                "border": 1, "border_color": "#1C5CAB",
+                                "align": "left", "valign": "vcenter", "text_wrap": True})
+        f_txt = wb.add_format({"font_name": "Arial", "font_size": 10, "valign": "top",
+                               "text_wrap": True})
+        f_num = wb.add_format({"font_name": "Arial", "font_size": 10, "num_format": "#,##0.00"})
+        f_int = wb.add_format({"font_name": "Arial", "font_size": 10, "num_format": "#,##0"})
+        f_fecha = wb.add_format({"font_name": "Arial", "font_size": 10,
+                                 "num_format": "yyyy-mm-dd"})
+        f_seccion = wb.add_format({"font_name": "Arial", "bold": True, "font_size": 11,
+                                   "bottom": 1, "bottom_color": "#D8D7D3"})
+
+        # ---------- Resumen
+        ws = wb.add_worksheet("Resumen")
+        xw.sheets["Resumen"] = ws
+        ws.hide_gridlines(2)
+        ws.set_column("A:A", 34)
+        ws.set_column("B:B", 92)
+        ws.write("A1", "Resumen del análisis", f_titulo)
+        ws.write("A2", f"Archivo: {source}", f_sub)
+        ws.write("A3", f"Generado: {datetime.now():%d/%m/%Y %H:%M}", f_sub)
+        fila = 5
+        ws.write(fila, 0, "Confianza en los datos", f_seccion)
+        ws.write(fila, 1, confianza, f_txt)
+        fila += 2
+        ws.write(fila, 0, "En una frase", f_seccion)
+        ws.write(fila, 1, resumen.replace("**", ""), f_txt)
+        fila += 2
+        if len(kpis):
+            ws.write(fila, 0, "Tus números", f_seccion)
+            fila += 1
+            for _, r in kpis.iterrows():
+                ws.write(fila, 0, str(r.iloc[0]), f_txt)
+                ws.write(fila, 1, str(r.iloc[1]), f_txt)
+                fila += 1
+            fila += 1
+        if len(hallazgos):
+            ws.write(fila, 0, "Lo más importante", f_seccion)
+            fila += 1
+            for _, r in hallazgos.iterrows():
+                ws.write(fila, 0, str(r.iloc[0]), f_txt)
+                ws.write(fila, 1, str(r.iloc[1]), f_txt)
+                fila += 1
+
+        # ---------- Datos limpios
+        datos.to_excel(xw, sheet_name="Datos limpios", index=False, startrow=0)
+        wsd = xw.sheets["Datos limpios"]
+        for j, col in enumerate(datos.columns):
+            wsd.write(0, j, str(col), f_head)
+            serie = datos[col]
+            if pd.api.types.is_datetime64_any_dtype(serie):
+                fmt = f_fecha
+            elif pd.api.types.is_integer_dtype(serie):
+                fmt = f_int
+            elif pd.api.types.is_numeric_dtype(serie):
+                fmt = f_num
+            else:
+                fmt = None
+            wsd.set_column(j, j, _ancho(serie, col), fmt)
+        wsd.freeze_panes(1, 0)
+        if len(datos):
+            wsd.autofilter(0, 0, len(datos), max(len(datos.columns) - 1, 0))
+        wsd.set_row(0, 30)
+
+        # ---------- hojas de explicación
+        def hoja_texto(nombre: str, filas: list[tuple[str, str]], anchos=(28, 96)):
+            w = wb.add_worksheet(nombre)
+            xw.sheets[nombre] = w
+            w.hide_gridlines(2)
+            w.set_column("A:A", anchos[0])
+            w.set_column("B:B", anchos[1])
+            w.write(0, 0, nombre, f_titulo)
+            for i, (a, b) in enumerate(filas, start=2):
+                w.write(i, 0, a, f_txt)
+                w.write(i, 1, b, f_txt)
+            w.freeze_panes(2, 0)
+
+        acciones = [l for l in prep_log if not l.startswith("Resultado:")]
+        hoja_texto("Qué corregimos",
+                   [(f"{i}.", l) for i, l in enumerate(acciones, 1)]
+                   or [("—", "No hizo falta corregir nada.")])
+
+        if len(problemas):
+            hoja_texto("Qué revisar",
+                       [(str(r.iloc[0]), str(r.iloc[1])) for _, r in problemas.iterrows()])
+        else:
+            hoja_texto("Qué revisar", [("—", "No se detectó ningún problema.")])
+
+    return buf.getvalue(), avisos
+
+
 # ---------------------------------------------------------------- modelo
 
 
