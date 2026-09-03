@@ -157,11 +157,15 @@ def _eje_fechas_es(fig: go.Figure, x) -> None:
             return
         s = s.sort_values().reset_index(drop=True)
         span = (s.iloc[-1] - s.iloc[0]).days
-        n = int(min(8, max(3, len(s))))
+        # seis marcas como máximo: en una tarjeta angosta, ocho se encinman
+        # y Plotly las gira en diagonal
+        n = int(min(6, max(3, len(s))))
         idx = sorted({int(round(i)) for i in np.linspace(0, len(s) - 1, n)})
         pts = [s.iloc[i] for i in idx]
         if span > 400:
-            etq = [f"{MESES_ES[t.month - 1]} {t.year}" for t in pts]
+            # "ene 24" y no "ene 2024": en una tarjeta angosta, el año completo
+            # obliga a Plotly a girar los rótulos en diagonal
+            etq = [f"{MESES_ES[t.month - 1]} {t.year % 100:02d}" for t in pts]
         elif span > 60:
             etq = [f"{MESES_ES[t.month - 1]} {t.year % 100:02d}" for t in pts]
         else:

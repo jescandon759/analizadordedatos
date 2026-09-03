@@ -280,25 +280,58 @@ def _pintar(fig, key: str, clickable: bool):
         return False
 
 
-def _rejilla(vistas: list[Vista]):
+def _tarjeta(v: Vista, alto: int):
+    """Una gráfica en su tarjeta. Se abre al picarle encima o al botón."""
     gen = st.session_state.get("_gen", 0)
+    with st.container(border=True):
+        st.markdown(f"**{v.titulo}**")
+        if _pintar(v.figura(alto), f"m_{v.id}_{gen}", clickable=True):
+            _abrir(v.id)
+            st.rerun()
+        if v.resumen:
+            st.markdown(f"<div class='lect'>{v.resumen}</div>", unsafe_allow_html=True)
+        if st.button("🔍 Ver a detalle", key=f"b_{v.id}_{gen}",
+                     use_container_width=True):
+            _abrir(v.id)
+            st.rerun()
+
+
+def _panel_cifras(v: Vista):
+    """El panel de al lado de la gráfica principal, con sus números."""
+    tiles = "".join(f"<div class='tile'><span class='t'>{estado.esc(t)}</span>"
+                    f"<span class='v'>{estado.esc(val)}</span></div>"
+                    for t, val in v.cifras[:4])
+    st.markdown(
+        f"<div class='hero hero-col'><span class='et'>En números</span>"
+        f"<div class='nom'>{estado.esc(v.titulo)}</div>"
+        f"<div class='tiles tiles-col'>{tiles}</div></div>", unsafe_allow_html=True)
+
+
+def _fila(vistas: list[Vista], por_fila: int, alto: int):
+    for inicio in range(0, len(vistas), por_fila):
+        cols = st.columns(por_fila, gap="medium")
+        for col, v in zip(cols, vistas[inicio:inicio + por_fila]):
+            with col:
+                _tarjeta(v, alto)
+
+
+def _rejilla(vistas: list[Vista]):
     st.caption("Pícale a cualquier gráfica —o a su botón— para abrirla en grande "
                "con su explicación, sus cifras y los datos de atrás.")
-    for fila in range(0, len(vistas), 2):
-        cols = st.columns(2, gap="medium")
-        for col, v in zip(cols, vistas[fila:fila + 2]):
-            with col, st.container(border=True):
-                st.markdown(f"**{v.titulo}**")
-                if _pintar(v.figura(ALTO_CHICA), f"m_{v.id}_{gen}", clickable=True):
-                    _abrir(v.id)
-                    st.rerun()
-                if v.resumen:
-                    st.markdown(f"<div class='lect'>{v.resumen}</div>",
-                                unsafe_allow_html=True)
-                if st.button("🔍 Ver a detalle", key=f"b_{v.id}_{gen}",
-                             use_container_width=True):
-                    _abrir(v.id)
-                    st.rerun()
+    principal, resto = vistas[0], vistas[1:]
+
+    c1, c2 = st.columns([2, 1], gap="medium")
+    with c1:
+        _tarjeta(principal, 290)
+    with c2:
+        _panel_cifras(principal)
+
+    if resto[:3]:
+        estado.sec("Desglose", "De dónde sale el número")
+        _fila(resto[:3], 3, ALTO_CHICA)
+    if resto[3:]:
+        estado.sec("Señales", "Cómo se reparte y qué se mueve junto")
+        _fila(resto[3:], 3, ALTO_CHICA)
 
 
 def _detalle(v: Vista):

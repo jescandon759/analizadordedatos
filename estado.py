@@ -75,7 +75,10 @@ CSS = """
   .hero .val{font-size:2.25rem;font-weight:800;letter-spacing:-.035em;
     line-height:1.08;margin:.4rem 0 .1rem 0}
   .hero .nom{font-size:.93rem;opacity:.9;margin-bottom:.95rem;line-height:1.4}
+  .hero-col{min-height:340px}
   .hero .tiles{display:flex;gap:.4rem}
+  .hero .tiles-col{flex-direction:column;gap:.45rem;margin-top:.2rem}
+  .hero .tiles-col .v{font-size:1.12rem}
   .hero .tile{flex:1;background:rgba(255,255,255,.15);border-radius:9px;
     padding:.5rem .6rem;min-width:0}
   .hero .tile .t{display:block;font-size:.58rem;letter-spacing:.09em;

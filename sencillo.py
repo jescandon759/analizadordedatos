@@ -374,34 +374,38 @@ def _kpis_extras(df, profiles, mapping, catalogo, errores, hay_propios):
         _constructor_kpi(df, profiles, mapping)
 
 
-def _dibujar(spec, df, key):
+def _dibujar(spec, df, key, alto: int = 240, lectura: bool = False):
     try:
         t = spec["type"]
         if t == "line":
             fig = charts.line_time(pd.DataFrame({"x": spec["x"], "y": spec["y"]}),
-                                   "x", "y", title="", height=240)
+                                   "x", "y", title="", height=alto)
         elif t == "bar":
-            fig = charts.bar_ranked(spec["labels"], spec["values"], "",
-                                    horizontal=len(spec["labels"]) > 5,
-                                    highlight=spec.get("highlight", 0), height=260,
+            etq, val = list(spec["labels"]), list(spec["values"])
+            if alto <= 200:
+                # en una tarjeta chica, bar_ranked crece 34px por barra para que
+                # se lean: con 10 categorías la tarjeta se estira al doble
+                etq, val = etq[:5], val[:5]
+            fig = charts.bar_ranked(etq, val, "", horizontal=len(etq) > 3,
+                                    highlight=spec.get("highlight", 0), height=alto,
                                     prefijo=spec.get("prefijo", ""))
         elif t == "box":
             d = df[[spec["dim"], spec["value"]]].copy()
             d[spec["value"]] = to_numeric_series(d[spec["value"]])
-            fig = charts.box_by_group(d.dropna(), spec["dim"], spec["value"], "", height=260)
+            fig = charts.box_by_group(d.dropna(), spec["dim"], spec["value"], "", height=alto)
         elif t == "hist":
             s = to_numeric_series(df[spec["col"]]).dropna()
-            fig = charts.histogram(s, "", spec["col"], 240, median=float(s.median()))
+            fig = charts.histogram(s, "", spec["col"], alto, median=float(s.median()))
         elif t == "scatter":
             d = df[[spec["x"], spec["y"]]].apply(to_numeric_series).dropna()
-            fig = charts.scatter(d, spec["x"], spec["y"], title="", height=260)
+            fig = charts.scatter(d, spec["x"], spec["y"], title="", height=alto)
         else:
             return
         st.plotly_chart(fig, use_container_width=True, key=key,
                         config={"displayModeBar": False})
-        lectura = expl.como_leer(t)
-        if lectura:
-            st.markdown(f"<div class='lect'>{lectura}</div>", unsafe_allow_html=True)
+        if lectura and expl.como_leer(t):
+            st.markdown(f"<div class='lect'>{expl.como_leer(t)}</div>",
+                        unsafe_allow_html=True)
     except Exception:  # noqa: BLE001
         pass
 
@@ -412,37 +416,20 @@ def _bloque_hallazgos(df, hallazgos):
     _sec("Hallazgos", "Lo más importante",
          f"{min(len(hallazgos), MAX_INSIGHTS)} de {len(hallazgos)}")
     vista = list(enumerate(hallazgos[:MAX_INSIGHTS]))
-
-    def tarjeta(n, h, plano=False):
-        st.markdown(
-            f"<div class='ins ins-{h.kind}{' ins-plano' if plano else ''}'>"
-            f"<span class='ins-h'>{ins_mod.ICON[h.kind]} {_esc(h.titulo_llano)}</span>"
-            f"<span>{_negritas(_esc(h.texto_llano))}</span></div>",
-            unsafe_allow_html=True)
-        if h.chart:
-            _dibujar(h.chart, df, f"h{n}")
-
-    # Los que traen gráfica ocupan la fila entera; si compartieran fila con uno
-    # de puro texto, al lado quedaría un hueco blanco del alto de la gráfica.
-    pendientes: list = []
-    for n, h in vista:
-        if h.chart:
-            for fila in range(0, len(pendientes), 2):
-                cols = st.columns(2, gap="medium")
-                for col, (m, g) in zip(cols, pendientes[fila:fila + 2]):
-                    with col:
-                        tarjeta(m, g)
-            pendientes = []
-            with st.container(border=True):
-                tarjeta(n, h, plano=True)
-            st.write("")
-        else:
-            pendientes.append((n, h))
-    for fila in range(0, len(pendientes), 2):
-        cols = st.columns(2, gap="medium")
-        for col, (m, g) in zip(cols, pendientes[fila:fila + 2]):
-            with col:
-                tarjeta(m, g)
+    # Todos del mismo tamaño, en rejilla de tres: la gráfica va DENTRO de la
+    # tarjeta y chica. Antes, un hallazgo con gráfica ocupaba la fila entera y
+    # rompía la rejilla — se veía como una lista larga, no como un tablero.
+    for fila in range(0, len(vista), 3):
+        cols = st.columns(3, gap="medium")
+        for col, (n, h) in zip(cols, vista[fila:fila + 3]):
+            with col, st.container(border=True):
+                st.markdown(
+                    f"<div class='ins ins-{h.kind} ins-plano'>"
+                    f"<span class='ins-h'>{ins_mod.ICON[h.kind]} {_esc(h.titulo_llano)}</span>"
+                    f"<span>{_negritas(_esc(h.texto_llano))}</span></div>",
+                    unsafe_allow_html=True)
+                if h.chart:
+                    _dibujar(h.chart, df, f"h{n}", alto=180)
 
 
 
