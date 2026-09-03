@@ -40,7 +40,9 @@ Se abre en `http://localhost:8501`. Sin datos a la mano, el botón
    completo en un desplegable, y un botón para ver los datos sin tocar.
 2. **Confianza en los datos** — semáforo Alta / Media / Baja, con una frase que
    explica qué significa. Sin puntajes técnicos.
-3. **Tus números** — hasta 6 KPIs detectados automáticamente, con su variación
+3. **Tus números** — con tres opciones: **los que la app recomiende** (y un
+   desplegable para elegir cuáles), **los tuyos** (armados desde menús, sin
+   escribir fórmulas) o **ninguno**.
    contra el periodo anterior.
 4. **Lo más importante** — los hallazgos ordenados por impacto, cada uno con su
    gráfica y redactado sin jerga.
@@ -134,7 +136,17 @@ el mismo archivo produce siempre el mismo diagnóstico y todo es verificable.
 
 ---
 
-## KPIs propios
+## Indicadores propios sin escribir fórmulas
+
+En el modo sencillo se arman desde menús: nombre, qué calcular (sumar, promediar,
+dividir una columna entre otra, margen, porcentaje de registros que cumplen una
+condición…), sobre qué columnas, con filtro opcional y una meta que enciende un
+semáforo. La app traduce esa selección a la fórmula interna y la valida antes de
+guardarla.
+
+Quien prefiera escribir la fórmula a mano puede hacerlo en el modo avanzado.
+
+## KPIs propios (sintaxis interna)
 
 Escribe una fórmula con nombres de columna entre comillas:
 

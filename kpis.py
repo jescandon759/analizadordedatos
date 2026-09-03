@@ -443,3 +443,77 @@ def suggest_mapping(profiles) -> dict[str, str | None]:
         "segmento": segmento,
         "estatus": estatus,
     }
+
+
+# --------------------------------------------------------------------------
+# Constructor de KPIs sin escribir fórmulas
+# --------------------------------------------------------------------------
+
+# clave -> (etiqueta que ve el usuario, cuántas columnas pide, admite filtro,
+#           formato sugerido, plantilla de fórmula)
+OPERACIONES: dict[str, tuple] = {
+    "sumar":        ("Sumar una columna", 1, True, FMT_MONEY, 'suma("{a}")'),
+    "promedio":     ("Promedio de una columna", 1, False, FMT_NUM, 'promedio("{a}")'),
+    "mediana":      ("Mediana de una columna", 1, False, FMT_NUM, 'mediana("{a}")'),
+    "maximo":       ("El valor más alto", 1, False, FMT_NUM, 'maximo("{a}")'),
+    "minimo":       ("El valor más bajo", 1, False, FMT_NUM, 'minimo("{a}")'),
+    "contar":       ("Contar registros", 0, True, FMT_INT, "conteo()"),
+    "distintos":    ("Contar valores distintos", 1, False, FMT_INT, 'unicos("{a}")'),
+    "dividir":      ("Dividir una columna entre otra", 2, False, FMT_NUM,
+                     'suma("{a}") / suma("{b}")'),
+    "restar":       ("Restar una columna de otra", 2, False, FMT_MONEY,
+                     'suma("{a}") - suma("{b}")'),
+    "margen":       ("Margen: (A − B) ÷ A", 2, False, FMT_PCT,
+                     '(suma("{a}") - suma("{b}")) / suma("{a}")'),
+    "promedio_por": ("Promedio por cada valor distinto de otra columna", 2, False, FMT_MONEY,
+                     'suma("{a}") / unicos("{b}")'),
+    "porcentaje":   ("Porcentaje de registros que cumplen una condición", 0, True, FMT_PCT,
+                     "conteo()"),
+}
+
+ETIQUETA_B = {
+    "dividir": "Dividir entre (columna B)",
+    "restar": "Restarle (columna B)",
+    "margen": "Menos esta columna (B, normalmente el costo)",
+    "promedio_por": "Por cada (columna B)",
+}
+
+
+def construir_formula(op: str, col_a: str | None = None, col_b: str | None = None,
+                      filtro_col: str | None = None, filtro_val: str | None = None) -> str:
+    """Traduce una selección de menús a una fórmula válida."""
+    if op not in OPERACIONES:
+        raise FormulaError(f"Operación desconocida: {op}")
+    _, n_cols, admite_filtro, _, plantilla = OPERACIONES[op]
+    if n_cols >= 1 and not col_a:
+        raise FormulaError("Falta elegir la columna.")
+    if n_cols >= 2 and not col_b:
+        raise FormulaError("Falta elegir la segunda columna.")
+
+    hay_filtro = bool(admite_filtro and filtro_col and filtro_val is not None)
+    if op == "porcentaje":
+        if not hay_filtro:
+            raise FormulaError("Para un porcentaje hay que elegir la condición.")
+        return f'conteo_si("{filtro_col}", "{filtro_val}") / conteo()'
+    if op == "contar":
+        return (f'conteo_si("{filtro_col}", "{filtro_val}")' if hay_filtro else "conteo()")
+    if op == "sumar" and hay_filtro:
+        return f'suma_si("{col_a}", "{filtro_col}", "{filtro_val}")'
+    return plantilla.format(a=col_a, b=col_b)
+
+
+def formato_sugerido(op: str) -> str:
+    return OPERACIONES[op][3] if op in OPERACIONES else FMT_NUM
+
+
+def descripcion_kpi(op: str, col_a=None, col_b=None, filtro_col=None, filtro_val=None) -> str:
+    """Frase en español de lo que calcula el KPI, para mostrarla bajo el número."""
+    etiqueta = OPERACIONES.get(op, ("", 0, False, "", ""))[0]
+    partes = [etiqueta]
+    if col_a:
+        partes.append(f"«{col_a}»")
+    if col_b:
+        partes.append(f"y «{col_b}»")
+    if filtro_col and filtro_val is not None:
+        partes.append(f", solo cuando «{filtro_col}» sea «{filtro_val}»")
+    return " ".join(partes)

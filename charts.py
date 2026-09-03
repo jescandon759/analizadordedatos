@@ -120,7 +120,9 @@ def line_time(df: pd.DataFrame, x: str, y: str, color: str | None = None,
                 line=dict(width=2, color=pal[i % len(pal)]),
                 hovertemplate=f"<b>{cat}</b>: %{{y:,.2f}}<extra></extra>",
             ))
-        return _layout(fig, title, ylab, "", legend=len(cats) >= 2, height=height)
+        fig = _layout(fig, title, ylab, "", legend=len(cats) >= 2, height=height)
+        _eje_fechas_es(fig, df[x])
+        return fig
 
     d = df.sort_values(x)
     fig.add_trace(go.Scatter(
@@ -129,7 +131,40 @@ def line_time(df: pd.DataFrame, x: str, y: str, color: str | None = None,
         fill="tozeroy", fillcolor=_alpha(pal[0], 0.12),
         hovertemplate="%{y:,.2f}<extra></extra>",
     ))
-    return _layout(fig, title, ylab, "", legend=False, height=height)
+    fig = _layout(fig, title, ylab, "", legend=False, height=height)
+    _eje_fechas_es(fig, d[x])
+    return fig
+
+
+MESES_ES = ["ene", "feb", "mar", "abr", "may", "jun",
+            "jul", "ago", "sep", "oct", "nov", "dic"]
+
+
+def _eje_fechas_es(fig: go.Figure, x) -> None:
+    """Pone los meses en español en el eje del tiempo.
+
+    Plotly viene con los nombres de mes en inglés y no trae el paquete de
+    idiomas, así que los rótulos se escriben a mano. En una app que habla
+    español, un eje que dice «Apr 2024» se siente ajeno.
+    """
+    try:
+        s = pd.Series(pd.to_datetime(pd.Series(list(x)), errors="coerce")).dropna()
+        if len(s) < 2:
+            return
+        s = s.sort_values().reset_index(drop=True)
+        span = (s.iloc[-1] - s.iloc[0]).days
+        n = int(min(8, max(3, len(s))))
+        idx = sorted({int(round(i)) for i in np.linspace(0, len(s) - 1, n)})
+        pts = [s.iloc[i] for i in idx]
+        if span > 400:
+            etq = [f"{MESES_ES[t.month - 1]} {t.year}" for t in pts]
+        elif span > 60:
+            etq = [f"{MESES_ES[t.month - 1]} {t.year % 100:02d}" for t in pts]
+        else:
+            etq = [f"{t.day} {MESES_ES[t.month - 1]}" for t in pts]
+        fig.update_xaxes(tickmode="array", tickvals=pts, ticktext=etq)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _alpha(hexcolor: str, a: float) -> str:

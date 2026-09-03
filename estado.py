@@ -15,42 +15,109 @@ import quality
 
 CSS = """
 <style>
-  .block-container{padding-top:2rem;max-width:1250px}
-  [data-testid="stMetricValue"]{font-size:1.9rem;letter-spacing:-.02em;font-weight:600}
-  [data-testid="stMetricLabel"]{font-size:.8rem;text-transform:uppercase;
-    letter-spacing:.05em;opacity:.7}
+  :root{--acc:#2a78d6;--acc-2:#215fa8;--line:#e6e4de;--ink:#0b0b0b;--mut:#6e6c66;}
+
+  /* el encabezado flotante de Streamlit tapa lo primero: hay que dejarle aire */
+  .block-container{padding-top:3.1rem;padding-bottom:3rem;max-width:1300px}
   h1{letter-spacing:-.02em}
-  .tarjeta{border:1px solid rgba(128,128,128,.22);border-radius:12px;
-    padding:1rem 1.15rem;margin-bottom:.7rem;background:rgba(128,128,128,.04)}
-  .ins{border:1px solid rgba(128,128,128,.22);border-left:4px solid #2a78d6;
-    border-radius:10px;padding:.9rem 1.1rem;margin-bottom:.5rem}
+
+  /* ---------------------------------------------------- barra superior */
+  .topbar{display:flex;align-items:baseline;gap:.75rem;flex-wrap:wrap;
+    border-bottom:1px solid var(--line);padding:.1rem 0 .75rem 0}
+  .topbar .marca{font-size:1.02rem;font-weight:800;letter-spacing:-.01em}
+  .topbar .sep{color:var(--line)}
+  .topbar .arch{font-size:.93rem;color:var(--mut);font-weight:600}
+  .topbar .meta{margin-left:auto;font-size:.78rem;color:var(--mut);
+    letter-spacing:.02em}
+
+  /* ------------------------------------------------ pestañas = navegación */
+  .stTabs [data-baseweb="tab-list"]{gap:.15rem;border-bottom:1px solid var(--line);
+    margin-bottom:.4rem}
+  .stTabs [data-baseweb="tab"]{height:44px;padding:0 .95rem;font-size:.92rem;
+    font-weight:600}
+  .stTabs [data-baseweb="tab-highlight"]{background:var(--acc)}
+  .stTabs [data-baseweb="tab-border"]{background:transparent}
+
+  /* --------------------------------------------- encabezado de sección */
+  .sec{display:flex;align-items:center;gap:.6rem;margin:1.15rem 0 .5rem 0}
+  .sec .chip{background:rgba(42,120,214,.11);color:var(--acc);font-size:.64rem;
+    font-weight:800;letter-spacing:.11em;padding:4px 9px;border-radius:5px;
+    text-transform:uppercase;white-space:nowrap;line-height:1}
+  .sec .tit{font-size:1.1rem;font-weight:700;letter-spacing:-.01em}
+  .sec .sub{margin-left:auto;font-size:.8rem;color:var(--mut);text-align:right}
+
+  /* -------------------------------------------------------- tarjetas */
+  [data-testid="stVerticalBlockBorderWrapper"]{background:#fff;border-radius:12px;
+    box-shadow:0 1px 2px rgba(16,16,16,.045)}
+  [data-testid="stMetricValue"]{font-size:1.75rem;letter-spacing:-.025em;
+    font-weight:700;line-height:1.15}
+  [data-testid="stMetricLabel"]{font-size:.68rem;text-transform:uppercase;
+    letter-spacing:.09em;font-weight:700;opacity:.62}
+
+  /* ------------------------------------------------------ panel destacado */
+  /* el panel ocupa todo el alto de su columna: los datos al pie quedan alineados
+     con la última tarjeta de la rejilla de al lado */
+  [data-testid="stHorizontalBlock"]:has(.hero){align-items:stretch}
+  [data-testid="stColumn"]:has(.hero) > [data-testid="stVerticalBlock"]
+    > [data-testid="stElementContainer"]{flex:1 1 auto}
+  [data-testid="stColumn"]:has(.hero) [data-testid="stMarkdown"],
+  [data-testid="stColumn"]:has(.hero) [data-testid="stMarkdownContainer"]{height:100%}
+  [data-testid="stColumn"]:has(.hero) [data-testid="stMarkdown"] > div{
+    height:100%;align-items:stretch}
+  .hero{background:linear-gradient(158deg,#2a78d6 0%,#215fa8 100%);color:#fff;
+    border-radius:14px;padding:1.15rem 1.25rem 1.05rem 1.25rem;height:100%;
+    display:flex;flex-direction:column;min-height:200px}
+  .hero .tiles{margin-top:auto}
+  .hero .et{font-size:.63rem;letter-spacing:.12em;text-transform:uppercase;
+    font-weight:800;opacity:.82}
+  .hero .val{font-size:2.25rem;font-weight:800;letter-spacing:-.035em;
+    line-height:1.08;margin:.4rem 0 .1rem 0}
+  .hero .nom{font-size:.93rem;opacity:.9;margin-bottom:.95rem;line-height:1.4}
+  .hero .tiles{display:flex;gap:.4rem}
+  .hero .tile{flex:1;background:rgba(255,255,255,.15);border-radius:9px;
+    padding:.5rem .6rem;min-width:0}
+  .hero .tile .t{display:block;font-size:.58rem;letter-spacing:.09em;
+    text-transform:uppercase;font-weight:800;opacity:.85}
+  .hero .tile .v{display:block;font-size:1rem;font-weight:700;margin-top:.2rem;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  /* -------------------------------------------------------- hallazgos */
+  .ins{border:1px solid var(--line);border-left:4px solid var(--acc);
+    background:#fff;border-radius:10px;padding:.9rem 1.05rem;margin-bottom:.55rem;
+    box-shadow:0 1px 2px rgba(16,16,16,.045)}
+  /* el hallazgo que va dentro de una tarjeta no necesita su propio marco */
+  .ins-plano{border:none;box-shadow:none;border-left-width:4px;border-left-style:solid;
+    border-radius:0;padding:.1rem 0 .2rem .8rem;margin-bottom:.6rem}
   .ins-riesgo{border-left-color:#e34948}
   .ins-oportunidad{border-left-color:#008300}
   .ins-contexto{border-left-color:#8a8a85}
-  .ins-h{display:block;margin-bottom:.3rem;font-size:1.02rem;line-height:1.35;
+  .ins-h{display:block;margin-bottom:.3rem;font-size:1rem;line-height:1.35;
     font-weight:700}
-  .ins span{font-size:.94rem;opacity:.9;line-height:1.6}
+  .ins span{font-size:.93rem;opacity:.9;line-height:1.6}
   .ins span b, .lect b, .atip b{font-weight:700}
+
+  /* -------------------------------------------------------- semáforo */
   .sem{display:flex;align-items:center;gap:.8rem;border-radius:12px;
-    padding:.9rem 1.15rem;margin-bottom:.4rem}
-  .sem-alta{background:rgba(0,131,0,.10);border:1px solid rgba(0,131,0,.35)}
-  .sem-media{background:rgba(237,161,0,.12);border:1px solid rgba(237,161,0,.4)}
-  .sem-baja{background:rgba(227,73,72,.10);border:1px solid rgba(227,73,72,.35)}
-  .sem .punto{font-size:1.6rem;line-height:1}
-  .sem .txt b{display:block;font-size:1rem;margin-bottom:.1rem}
-  .sem .txt span{font-size:.9rem;opacity:.85}
+    padding:.85rem 1.1rem;margin-bottom:.4rem}
+  .sem-alta{background:rgba(0,131,0,.09);border:1px solid rgba(0,131,0,.32)}
+  .sem-media{background:rgba(237,161,0,.11);border:1px solid rgba(237,161,0,.38)}
+  .sem-baja{background:rgba(227,73,72,.09);border:1px solid rgba(227,73,72,.32)}
+  .sem .punto{font-size:1.5rem;line-height:1}
+  .sem .txt b{display:block;font-size:.98rem;margin-bottom:.1rem}
+  .sem .txt span{font-size:.89rem;opacity:.85}
+
   .pill{display:inline-block;padding:1px 9px;border-radius:99px;font-size:.7rem;
     font-weight:600;letter-spacing:.03em}
   .p-crit{background:rgba(227,73,72,.16);color:#e34948}
   .p-adv{background:rgba(237,161,0,.18);color:#c98500}
   .p-info{background:rgba(42,120,214,.16);color:#2a78d6}
-  .fix{font-size:.93rem;line-height:1.65;margin:.15rem 0}
-  .lect{font-size:.92rem;line-height:1.65;opacity:.88;margin:-.5rem 0 .6rem 0}
+  .fix{font-size:.92rem;line-height:1.65;margin:.15rem 0}
+  .lect{font-size:.9rem;line-height:1.6;opacity:.86;margin:-.35rem 0 .5rem 0}
   .atip{border-left:3px solid #eda100;background:rgba(237,161,0,.09);
-    border-radius:8px;padding:.6rem .85rem;font-size:.92rem;line-height:1.6;
-    margin-bottom:.45rem}
-  .atip-t{font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;
-    opacity:.65;margin:.2rem 0 .35rem 0}
+    border-radius:8px;padding:.6rem .85rem;font-size:.9rem;line-height:1.55;
+    margin-bottom:.4rem}
+  .atip-t{font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;
+    opacity:.6;font-weight:700;margin:.25rem 0 .35rem 0}
 </style>
 """
 
@@ -65,6 +132,7 @@ DEFAULTS = {
     "custom": [],
     "model": None,
     "selected_kpis": None,
+    "kpi_modo": "recomendados",   # recomendados | propios | ninguno
     "currency": "$",
     "avanzado": False,
     "nav": None,
@@ -131,8 +199,15 @@ def active_df() -> pd.DataFrame | None:
     return st.session_state.clean
 
 
+def olvidar_excel():
+    """El Excel armado deja de valer en cuanto cambian los datos activos."""
+    st.session_state.pop("_excel_listo", None)
+    st.session_state.pop("_excel_avisos", None)
+
+
 def cargar(df: pd.DataFrame, source: str) -> None:
     """Guarda el archivo y aplica de una vez las correcciones seguras."""
+    olvidar_excel()
     st.session_state.raw = df
     st.session_state.source = source
     st.session_state.usar_original = False

@@ -55,12 +55,19 @@ check("Muestra el semáforo de confianza",
 check("Muestra hallazgos", any("Lo más importante" in m.value for m in at.markdown))
 check("Avisa qué corrigió", any("Corregimos" in s.value for s in at.success), )
 botones = at.get("download_button")
-check("Ofrece las tres descargas", len(botones) == 3, f"{len(botones)}")
-check("La descarga principal es el Excel limpio",
-      any("Excel limpio" in b.label for b in botones),
-      str([b.label for b in botones]))
+check("Ofrece las descargas directas", len(botones) == 2, f"{len(botones)}")
+prep_excel = [b for b in at.button if "Preparar Excel" in b.label]
+check("El Excel se arma solo cuando se pide", len(prep_excel) == 1,
+      str([b.label for b in at.button]))
+if prep_excel:
+    prep_excel[0].click().run()
+    check("Al pedirlo, arma el Excel sin error", not at.exception, err(at))
+    check("Aparece la descarga del Excel",
+          any("Descargar Excel limpio" in b.label for b in at.get("download_button")),
+          str([b.label for b in at.get("download_button")]))
 check("Sigue sin fases a la vista", len(at.sidebar.radio) == 0)
-textos_md = " ".join(m.value for m in at.markdown)
+# el bloque <style> no es texto que el usuario lea: no cuenta para la jerga
+textos_md = " ".join(m.value for m in at.markdown if "<style>" not in m.value)
 for jerga in ["ANOVA", "p-valor", "R²", "silueta", "desviaciones estándar", "baseline"]:
     check(f"Sin jerga en pantalla: '{jerga}'", jerga not in textos_md)
 
@@ -68,6 +75,53 @@ check("Explica qué significa cada gráfica",
       textos_md.count("Cómo leerla") >= 2, f"{textos_md.count('Cómo leerla')} lecturas")
 check("Señala los valores fuera de lo normal",
       "fuera de lo normal" in textos_md or "se salió de lo normal" in textos_md)
+
+print("\n=== Indicadores: recomendados / propios / ninguno ===")
+sel_modo = [r for r in at.radio if r.key == "kpi_modo"]
+check("Ofrece elegir qué indicadores ver", len(sel_modo) == 1)
+if sel_modo:
+    check("Por defecto usa los recomendados",
+          at.session_state["kpi_modo"] == "recomendados")
+    n_metricas = len(at.metric)
+
+    sel_modo[0].set_value("ninguno").run()
+    check("Se pueden apagar por completo", len(at.metric) == 0 and not at.exception,
+          f"{len(at.metric)} métricas · {err(at)}")
+
+    at.radio(key="kpi_modo").set_value("propios").run()
+    check("Modo propio sin error", not at.exception, err(at))
+    check("Ofrece el constructor de indicadores",
+          any("Crear un indicador" in e.label for e in at.get("expander")),
+          str([e.label for e in at.get("expander")]))
+    nombre_in = [i for i in at.text_input if "se llama tu indicador" in (i.label or "")]
+    check("Pide nombre en lenguaje llano", len(nombre_in) == 1,
+          str([i.label for i in at.text_input]))
+    op_sel = [s_ for s_ in at.selectbox if "¿Qué quieres calcular?" == (s_.label or "")]
+    check("Elige la operación de un menú, sin fórmulas", len(op_sel) == 1)
+    if nombre_in and op_sel:
+        nombre_in[0].set_value("Margen propio")
+        op_sel[0].set_value("margen")
+        at.run()
+        cols = [s_ for s_ in at.selectbox if (s_.label or "").startswith("¿De qué columna?")]
+        segunda = [s_ for s_ in at.selectbox if "Menos esta columna" in (s_.label or "")]
+        if cols and segunda:
+            cols[0].set_value("Importe")
+            segunda[0].set_value("Costo")
+        agregar = [b_ for b_ in at.button if "Agregar indicador" in b_.label]
+        if agregar:
+            agregar[0].click().run()
+            check("Crea el indicador sin escribir fórmulas",
+                  len(at.session_state["custom"]) == 1 and not at.exception,
+                  str(at.session_state["custom"])[:90])
+            check("La fórmula generada es la correcta",
+                  at.session_state["custom"][0].formula ==
+                  '(suma("Importe") - suma("Costo")) / suma("Importe")',
+                  at.session_state["custom"][0].formula if at.session_state["custom"] else "")
+            check("El indicador propio se muestra", len(at.metric) >= 1, f"{len(at.metric)}")
+
+    at.radio(key="kpi_modo").set_value("recomendados").run()
+    check("Vuelve a los recomendados", len(at.metric) >= 4 and not at.exception,
+          f"{len(at.metric)} métricas")
 
 print("\n=== Interacciones del modo sencillo ===")
 sin_corregir = [b for b in at.button if "sin corregir" in b.label]
