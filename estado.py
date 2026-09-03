@@ -5,6 +5,8 @@ exactamente los mismos datos y los mismos hallazgos.
 """
 from __future__ import annotations
 
+import html
+
 import pandas as pd
 import streamlit as st
 
@@ -121,6 +123,25 @@ CSS = """
 </style>
 """
 
+def esc(t) -> str:
+    return html.escape(str(t))
+
+
+def negritas(texto: str) -> str:
+    """Convierte **x** en <b>x</b>: dentro de HTML crudo Streamlit no lee markdown."""
+    partes = texto.split("**")
+    return "".join(p if i % 2 == 0 else f"<b>{p}</b>" for i, p in enumerate(partes))
+
+
+def sec(chip: str, titulo: str, sub: str = ""):
+    """Encabezado de sección: etiqueta de color + título, como en un tablero."""
+    st.markdown(
+        f"<div class='sec'><span class='chip'>{esc(chip)}</span>"
+        f"<span class='tit'>{esc(titulo)}</span>"
+        + (f"<span class='sub'>{esc(sub)}</span>" if sub else "")
+        + "</div>", unsafe_allow_html=True)
+
+
 DEFAULTS = {
     "raw": None,             # datos tal como vinieron
     "clean": None,           # datos después de la limpieza automática
@@ -203,6 +224,9 @@ def olvidar_excel():
     """El Excel armado deja de valer en cuanto cambian los datos activos."""
     st.session_state.pop("_excel_listo", None)
     st.session_state.pop("_excel_avisos", None)
+    # el tablero vuelve a la rejilla: la gráfica abierta era de los datos viejos
+    st.session_state["_vista"] = None
+    st.session_state["_gen"] = st.session_state.get("_gen", 0) + 1
 
 
 def cargar(df: pd.DataFrame, source: str) -> None:

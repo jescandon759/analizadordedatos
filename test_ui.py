@@ -71,10 +71,26 @@ textos_md = " ".join(m.value for m in at.markdown if "<style>" not in m.value)
 for jerga in ["ANOVA", "p-valor", "R²", "silueta", "desviaciones estándar", "baseline"]:
     check(f"Sin jerga en pantalla: '{jerga}'", jerga not in textos_md)
 
-check("Explica qué significa cada gráfica",
-      textos_md.count("Cómo leerla") >= 2, f"{textos_md.count('Cómo leerla')} lecturas")
-check("Señala los valores fuera de lo normal",
-      "fuera de lo normal" in textos_md or "se salió de lo normal" in textos_md)
+print("\n=== Tablero: rejilla y vista a detalle ===")
+detalle = [b for b in at.button if "Ver a detalle" in b.label]
+check("El tablero muestra varias gráficas juntas", len(detalle) >= 3,
+      f"{len(detalle)} gráficas")
+if detalle:
+    detalle[0].click().run()
+    check("Se abre la gráfica a detalle", not at.exception, err(at))
+    det = " ".join(m.value for m in at.markdown if "<style>" not in m.value)
+    check("A detalle explica cómo leerla", "Cómo leerla" in det)
+    check("A detalle señala los valores fuera de lo normal",
+          "fuera de lo normal" in det or "se salió de lo normal" in det)
+    check("A detalle da cifras de apoyo", len(at.metric) >= 3, f"{len(at.metric)} cifras")
+    check("A detalle trae la tabla de datos", len(at.get("dataframe")) >= 1)
+    volver = [b for b in at.button if "Volver al tablero" in b.label]
+    check("Ofrece volver al tablero", len(volver) == 1)
+    if volver:
+        volver[0].click().run()
+        check("Vuelve a la rejilla sin quedarse atorado",
+              not at.exception and len([b for b in at.button
+                                        if "Ver a detalle" in b.label]) >= 3, err(at))
 
 print("\n=== Indicadores: recomendados / propios / ninguno ===")
 sel_modo = [r for r in at.radio if r.key == "kpi_modo"]

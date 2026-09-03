@@ -5,8 +5,6 @@ se decide solo, y se dice claramente qué se hizo.
 """
 from __future__ import annotations
 
-import html
-
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -20,6 +18,7 @@ import kpis as kpi_mod
 import loader
 import profiling
 import quality
+import tablero
 import textos
 from demo import build_demo
 from utils import fmt_num, fmt_pct, to_datetime_series, to_numeric_series
@@ -27,23 +26,10 @@ from utils import fmt_num, fmt_pct, to_datetime_series, to_numeric_series
 MAX_INSIGHTS = 5
 
 
-def _negritas(texto: str) -> str:
-    """Convierte **x** en <b>x</b>: dentro de HTML crudo Streamlit no lee markdown."""
-    partes = texto.split("**")
-    return "".join(p if i % 2 == 0 else f"<b>{p}</b>" for i, p in enumerate(partes))
-
-
-def _esc(t) -> str:
-    return html.escape(str(t))
-
-
-def _sec(chip: str, titulo: str, sub: str = ""):
-    """Encabezado de sección: etiqueta de color + título, como en un tablero."""
-    st.markdown(
-        f"<div class='sec'><span class='chip'>{_esc(chip)}</span>"
-        f"<span class='tit'>{_esc(titulo)}</span>"
-        + (f"<span class='sub'>{_esc(sub)}</span>" if sub else "")
-        + "</div>", unsafe_allow_html=True)
+# viven en estado.py para que el tablero también los use
+_negritas = estado.negritas
+_esc = estado.esc
+_sec = estado.sec
 
 
 MESES = ["ene", "feb", "mar", "abr", "may", "jun",
@@ -459,77 +445,6 @@ def _bloque_hallazgos(df, hallazgos):
                 tarjeta(m, g)
 
 
-def _bloque_graficas(df, profiles, mapping):
-    date_cols = profiling.suggest_date_columns(profiles)
-    num_cols = profiling.suggest_metric_columns(profiles)
-    dim_cols = profiling.suggest_dimension_columns(profiles)
-    if not num_cols:
-        return
-    metrica = mapping.get("ingreso") if mapping.get("ingreso") in num_cols else num_cols[0]
-
-    moneda = (st.session_state.currency
-              if mapping.get("ingreso") == metrica else None)
-    hechas = []   # (título, figura, lectura, [atípicos])
-
-    fecha = mapping.get("fecha") if mapping.get("fecha") in date_cols else (
-        date_cols[0] if date_cols else None)
-    if fecha:
-        f = to_datetime_series(df[fecha])
-        d = df.assign(_f=f, _v=to_numeric_series(df[metrica]))[ins_mod.robust_date_mask(f)]
-        if len(d) > 3:
-            span = (d["_f"].max() - d["_f"].min()).days
-            freq, etq = (("D", "día") if span <= 60 else
-                         ("W", "semana") if span <= 365 else ("ME", "mes"))
-            serie = d.set_index("_f")["_v"].resample(freq).sum()
-            # el último periodo casi siempre está incompleto y dibuja una caída falsa
-            if len(serie) > 2 and serie.index[-1] > d["_f"].max():
-                serie = serie.iloc[:-1]
-            hechas.append((
-                f"Cómo va {metrica} por {etq}",
-                charts.line_time(pd.DataFrame({"x": serie.index, "y": serie.values}),
-                                 "x", "y", title="", ylab=metrica, height=300),
-                expl.leer_serie(serie, freq, etq, metrica, moneda),
-                expl.atipicos_serie(serie, df, fecha, metrica, mapping, freq, etq, moneda)))
-
-    dim = mapping.get("segmento") or mapping.get("producto")
-    if dim not in dim_cols:
-        dim = dim_cols[0] if dim_cols else None
-    if dim:
-        agg = (df.assign(_v=to_numeric_series(df[metrica])).groupby(dim)["_v"].sum()
-                 .sort_values(ascending=False))
-        if len(agg) > 1:
-            etq, vals, n_resto = charts.top_con_otros(agg, 8)
-            hechas.append((
-                f"{metrica} por {dim.lower()}",
-                charts.bar_ranked(etq, vals, "", metrica, height=300,
-                                  prefijo=moneda or ""),
-                expl.leer_ranking(agg, dim, metrica, moneda, n_resto),
-                expl.atipicos_ranking(agg, dim, moneda)))
-
-    if not hechas:
-        st.info("Con estas columnas no alcanza para dibujar una gráfica útil. "
-                "Revisa en **Calidad de datos** si interpretamos bien tus columnas.")
-        return
-    _sec("Gráficas", "Cómo se ve tu operación", f"{len(hechas)} vistas")
-    for i, (titulo, fig, lectura, atipicos) in enumerate(hechas):
-        with st.container(border=True):
-            st.markdown(f"**{titulo}**")
-            st.plotly_chart(fig, use_container_width=True, key=f"g{i}",
-                            config={"displayModeBar": False})
-            if lectura:
-                st.markdown(f"<div class='lect'>{_negritas(lectura)}</div>",
-                            unsafe_allow_html=True)
-            if atipicos:
-                st.markdown("<div class='atip-t'>Valores fuera de lo normal</div>",
-                            unsafe_allow_html=True)
-                for a in atipicos:
-                    st.markdown(f"<div class='atip'>{_negritas(a)}</div>",
-                                unsafe_allow_html=True)
-                st.caption("Estas son pistas de dónde salió el número, no la causa. "
-                           "La causa la sabes tú: una campaña, un cliente grande, un cierre "
-                           "de mes o un error de captura.")
-        st.write("")
-
 
 def _bloque_problemas(issues, counts):
     if not issues:
@@ -692,7 +607,7 @@ def render():
 
     pendientes = len([i for i in issues if not textos.es_corregible(i)])
     t_resumen, t_graficas, t_calidad, t_descargas = st.tabs(
-        ["Resumen", "Gráficas", f"Calidad de datos ({pendientes})", "Descargas"])
+        ["Resumen", "Tablero", f"Calidad de datos ({pendientes})", "Descargas"])
 
     # ---------------------------------------------------------------- resumen
     with t_resumen:
@@ -716,9 +631,9 @@ def render():
 
         _bloque_hallazgos(df, hallazgos)
 
-    # --------------------------------------------------------------- gráficas
+    # ---------------------------------------------------------------- tablero
     with t_graficas:
-        _bloque_graficas(df, profiles, mapping)
+        tablero.render(df, profiles, mapping, moneda)
 
     # ---------------------------------------------------------------- calidad
     with t_calidad:

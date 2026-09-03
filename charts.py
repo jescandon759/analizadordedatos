@@ -125,9 +125,13 @@ def line_time(df: pd.DataFrame, x: str, y: str, color: str | None = None,
         return fig
 
     d = df.sort_values(x)
+    # con pocos puntos se dibujan los marcadores: se ve dónde cae cada periodo
+    # y, en el tablero, son el blanco al que se le pica para abrir la gráfica
+    modo = "lines+markers" if len(d) <= 120 else "lines"
     fig.add_trace(go.Scatter(
-        x=d[x], y=d[y], mode="lines", name=y,
+        x=d[x], y=d[y], mode=modo, name=y,
         line=dict(width=2, color=pal[0]),
+        marker=dict(size=6, color=pal[0]),
         fill="tozeroy", fillcolor=_alpha(pal[0], 0.12),
         hovertemplate="%{y:,.2f}<extra></extra>",
     ))
