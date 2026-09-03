@@ -285,6 +285,10 @@ def _constructor_kpi(df, profiles, mapping):
             if not nombre.strip():
                 st.error("Ponle un nombre a tu indicador.")
                 return
+            if any(k.name.lower() == nombre.strip().lower() for k in st.session_state.custom):
+                st.error(f"Ya tienes un indicador que se llama «{nombre.strip()}». "
+                         "Ponle otro nombre para poder distinguirlos.")
+                return
             try:
                 formula = kpi_mod.construir_formula(op, col_a, col_b, filtro_col, filtro_val)
                 kpi_mod.FormulaEvaluator(df).evaluate(formula)
@@ -294,6 +298,9 @@ def _constructor_kpi(df, profiles, mapping):
             st.session_state.custom.append(kpi_mod.CustomKPI(
                 nombre.strip(), formula, fmt, meta or None,
                 kpi_mod.descripcion_kpi(op, col_a, col_b, filtro_col, filtro_val)))
+            st.session_state["_kpi_nuevo"] = True
+            st.session_state["_kpi_nombre"] = nombre.strip()
+            st.session_state["_kpi_abierto"] = True   # listo para el siguiente
             st.rerun()
 
 
@@ -362,15 +369,28 @@ def _kpis_extras(df, profiles, mapping, catalogo, errores, hay_propios):
     # --- modo "propios"
     for e in errores:
         st.error(e.replace("**", ""))
-    if hay_propios:
-        quitar = st.selectbox("Quitar un indicador",
-                              ["(ninguno)"] + [k.name for k in st.session_state.custom],
-                              key="quitar_kpi")
-        if quitar != "(ninguno)" and st.button("Quitar"):
-            st.session_state.custom = [k for k in st.session_state.custom if k.name != quitar]
-            st.rerun()
+    if st.session_state.pop("_kpi_nuevo", None):
+        st.success(f"«{st.session_state.pop('_kpi_nombre', '')}» agregado. "
+                   "Puedes seguir agregando los que necesites.", icon="✅")
 
-    with st.expander("➕ Crear un indicador", expanded=not hay_propios):
+    creados = st.session_state.custom
+    if creados:
+        with st.expander(f"📋 Tus indicadores ({len(creados)}) — quitar o revisar", expanded=False):
+            for n, k in enumerate(creados):
+                c1, c2 = st.columns([5, 1])
+                c1.markdown(f"**{_esc(k.name)}**")
+                c1.caption(k.help or k.formula)
+                if c2.button("Quitar", key=f"quitar_{n}", use_container_width=True):
+                    st.session_state.custom = [x for i, x in enumerate(creados) if i != n]
+                    st.rerun()
+
+    # se queda abierto en cuanto agregas uno: es la señal de que puedes seguir
+    abierto = (not creados) or st.session_state.get("_kpi_abierto", False)
+    etiqueta = "➕ Crear un indicador" if not creados else "➕ Agregar otro indicador"
+    with st.expander(etiqueta, expanded=abierto):
+        if creados:
+            st.caption(f"Ya llevas {len(creados)}. Agrega los que quieras: aparecen todos "
+                       "en la rejilla de arriba, uno por tarjeta.")
         _constructor_kpi(df, profiles, mapping)
 
 

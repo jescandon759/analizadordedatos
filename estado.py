@@ -241,6 +241,8 @@ def cargar(df: pd.DataFrame, source: str) -> None:
     st.session_state.model = None
     st.session_state.custom = []
     st.session_state.selected_kpis = None
+    for k in ("_kpi_nuevo", "_kpi_nombre", "_kpi_abierto"):
+        st.session_state.pop(k, None)
 
     profiles, issues, _, _, _ = analyze(df)
     plan = prep.plan_from_issues(issues, aggressive=False)

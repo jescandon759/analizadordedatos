@@ -135,6 +135,42 @@ if sel_modo:
                   at.session_state["custom"][0].formula if at.session_state["custom"] else "")
             check("El indicador propio se muestra", len(at.metric) >= 1, f"{len(at.metric)}")
 
+            # y ahora el segundo: se pueden tener varios propios a la vez
+            check("Invita a agregar otro",
+                  any("Agregar otro indicador" in e.label for e in at.get("expander")),
+                  str([e.label for e in at.get("expander")]))
+            n2 = [i for i in at.text_input if "se llama tu indicador" in (i.label or "")]
+            o2 = [s_ for s_ in at.selectbox if "¿Qué quieres calcular?" == (s_.label or "")]
+            if n2 and o2:
+                n2[0].set_value("Ventas totales")
+                o2[0].set_value("sumar")
+                at.run()
+                c2 = [s_ for s_ in at.selectbox if (s_.label or "").startswith("¿De qué columna?")]
+                if c2:
+                    c2[0].set_value("Importe")
+                b2 = [b_ for b_ in at.button if "Agregar indicador" in b_.label]
+                if b2:
+                    b2[0].click().run()
+                    check("Se pueden tener varios indicadores propios",
+                          len(at.session_state["custom"]) == 2 and not at.exception,
+                          str([k.name for k in at.session_state["custom"]]))
+                    check("Los dos se pintan en la rejilla", len(at.metric) >= 2,
+                          f"{len(at.metric)} métricas")
+                    check("Los lista para poder quitarlos",
+                          any("Tus indicadores (2)" in e.label for e in at.get("expander")),
+                          str([e.label for e in at.get("expander")]))
+                    # nombre repetido: se rechaza para no confundir dos tarjetas iguales
+                    n3 = [i for i in at.text_input if "se llama tu indicador" in (i.label or "")]
+                    if n3:
+                        n3[0].set_value("Ventas totales")
+                        at.run()
+                        b3 = [b_ for b_ in at.button if "Agregar indicador" in b_.label]
+                        if b3:
+                            b3[0].click().run()
+                            check("No admite dos indicadores con el mismo nombre",
+                                  len(at.session_state["custom"]) == 2,
+                                  str([k.name for k in at.session_state["custom"]]))
+
     at.radio(key="kpi_modo").set_value("recomendados").run()
     check("Vuelve a los recomendados", len(at.metric) >= 4 and not at.exception,
           f"{len(at.metric)} métricas")
