@@ -414,6 +414,33 @@ for nombre, d in casos.items():
         traceback.print_exc()
         check(f"'{nombre}' no truena", False)
 
+seccion("Valores fuera de escala")
+# Caso real que se nos escapaba: una columna de cantidad donde casi todo es 1.
+# Q1 = Q3 = 1, así que el rango intercuartílico vale cero y la prueba de
+# extremos ni siquiera corría — justo donde un 1,370 entre unos más salta.
+raro = pd.DataFrame({
+    "Cantidad": [1] * 300 + [2] * 40 + [3] * 10 + [50] + [1370, 1370, 1370],
+    "Gtin": [2010845000000 + i for i in range(354)],      # código de barras
+    "Precio": list(np.random.default_rng(7).gamma(3, 200, 354)),
+})
+pr = profiling.profile_dataframe(raro)
+iss = quality.detect_issues(raro, pr)
+raros = [i for i in iss if i.code == "valor_raro"]
+check("Detecta el valor fuera de escala aunque el RIC sea cero",
+      any(i.column == "Cantidad" for i in raros), str([i.column for i in raros]))
+cant = next((i for i in raros if i.column == "Cantidad"), None)
+if cant:
+    check("Marca exactamente los tres registros", cant.n_affected == 3, str(cant.n_affected))
+    check("Dice en qué fila del archivo están",
+          [f["fila"] for f in cant.payload["filas"]] == [353, 354, 355],
+          str([f["fila"] for f in cant.payload["filas"]]))
+    check("Lo explica sin jerga",
+          "veces menos" in cant.detail and "RIC" not in cant.detail)
+check("No confunde un código de barras con un valor raro",
+      not any(i.column == "Gtin" for i in raros))
+check("No inventa rarezas en una distribución sana",
+      not any(i.column == "Precio" for i in raros))
+
 seccion("Resultado")
 if FALLOS:
     print(f"❌ {len(FALLOS)} verificación(es) fallaron:")

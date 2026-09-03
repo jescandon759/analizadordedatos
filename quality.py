@@ -238,6 +238,100 @@ def _text_hygiene(df: pd.DataFrame, profiles, out: list[Issue]) -> None:
                     ))
 
 
+MAX_RAROS_LISTADOS = 15
+
+# nombres que delatan una etiqueta disfrazada de número: un código de barras no
+# tiene valores "extremos", tiene códigos, y compararlos entre sí no significa nada
+NOMBRE_CODIGO = re.compile(
+    r"(gtin|ean|upc|isbn|sku|barcode|codigo|código|clave|cve|folio|referencia|"
+    r"reference|serial|numero_?de|postal|zip|^cp$|telefono|teléfono|phone|"
+    r"(^|[_\s])id([_\s]|$)|_id|id_)", re.I)
+
+
+def _parece_codigo(nombre: str, vals: pd.Series) -> bool:
+    """¿Esta columna numérica es en realidad una etiqueta?"""
+    n = str(nombre)
+    if NOMBRE_CODIGO.search(n):
+        return True
+    # camelCase típico de exportaciones: _BrandId, _CategoryId, customerId
+    if re.search(r"(?:Id|ID)$", n) or re.search(r"(?:^|_)id$", n, re.I):
+        return True
+    v = vals.dropna()
+    if v.empty:
+        return False
+    # enteros de 11 dígitos o más: códigos de barras, folios largos, timestamps
+    return bool((v % 1 == 0).all() and float(v.abs().median()) >= 1e10)
+
+
+def _valores_raros(df: pd.DataFrame, profiles, out: list[Issue]) -> None:
+    """Valores absurdos: los que están separados del resto por un salto enorme.
+
+    La prueba de extremos por rango intercuartílico tiene un punto ciego grave:
+    cuando una columna está tan concentrada que Q1 = Q3 (por ejemplo, una
+    columna de cantidad donde el 89% de los registros dice «1»), el RIC vale
+    cero y la prueba no corre — justo el caso donde un 1,370 entre puros unos
+    es más evidente.
+
+    Aquí se busca otra cosa: un **salto** en la cola. Se ordenan los valores
+    distintos de la parte alta y, si uno es varias veces más grande que el
+    inmediato anterior, todo lo que queda por encima del salto es sospechoso.
+    Una distribución sana no tiene saltos así: sube de forma pareja.
+    """
+    n = len(df)
+    if n < 50:
+        return
+    for p in profiles.values():
+        if p.semantic != "numerico" or p.role == "identificador" or not p.stats:
+            continue
+        s = to_numeric_series(df[p.name])
+        v = s.dropna()
+        if len(v) < 50 or _parece_codigo(p.name, v):
+            continue
+
+        corte_cola = float(v.quantile(0.99))
+        distintos = sorted({float(x) for x in v.unique() if x > corte_cola})
+        if len(distintos) < 2:
+            continue
+
+        # el salto más grande de la cola: dónde el siguiente valor se dispara
+        salto, umbral = 0.0, None
+        for anterior, actual in zip(distintos, distintos[1:]):
+            if anterior <= 0:
+                continue
+            razon = actual / anterior
+            if razon > salto:
+                salto, umbral = razon, actual
+        if umbral is None or salto < 5:
+            continue
+
+        marcadas = s[s >= umbral]
+        # si son muchas ya no es una rareza, es la distribución. El mínimo de 5
+        # es para que en un archivo chico tres registros absurdos sigan contando
+        limite = max(5, int(0.005 * len(v)))
+        if marcadas.empty or len(marcadas) > limite:
+            continue
+
+        total = float(v.sum())
+        peso = float(marcadas.sum()) / total if total else 0.0
+        filas = [{"fila": int(df.index.get_loc(i)) + 2, "valor": float(x)}
+                 for i, x in marcadas.items()][:MAX_RAROS_LISTADOS]
+        normal = float(v[v < umbral].max()) if (v < umbral).any() else float(v.median())
+
+        out.append(Issue(
+            "valor_raro", CRITICO if peso > 0.05 else ADVERTENCIA,
+            f"Valores fuera de escala en '{p.name}'",
+            f"{len(marcadas):,} registro(s) valen {fmt_num(float(marcadas.min()))} o más, "
+            f"cuando el valor más alto del resto es {fmt_num(normal)} "
+            f"({salto:.0f} veces menos) y lo típico es {fmt_num(float(v.median()))}. "
+            f"Esos registros se llevan el {peso:.1%} del total de la columna.",
+            column=p.name, n_affected=int(len(marcadas)),
+            pct_affected=len(marcadas) / len(v),
+            payload={"filas": filas, "umbral": umbral, "normal": normal,
+                     "peso": peso, "mediana": float(v.median()),
+                     "total_marcadas": int(len(marcadas))},
+        ))
+
+
 def _numeric_sanity(df: pd.DataFrame, profiles, out: list[Issue]) -> None:
     for p in profiles.values():
         if p.semantic != "numerico" or not p.stats:
@@ -247,7 +341,7 @@ def _numeric_sanity(df: pd.DataFrame, profiles, out: list[Issue]) -> None:
         if p.role == "identificador":
             continue
         vals = to_numeric_series(df[p.name]).dropna()
-        if vals.empty:
+        if vals.empty or _parece_codigo(p.name, vals):
             continue
         st = p.stats
 
@@ -400,6 +494,7 @@ def detect_issues(df: pd.DataFrame, profiles: dict[str, ColumnProfile]) -> list[
     _type_mismatch(profiles, out)
     _text_hygiene(df, profiles, out)
     _numeric_sanity(df, profiles, out)
+    _valores_raros(df, profiles, out)
     _date_sanity(df, profiles, out)
     _redundancy(df, profiles, out)
     _high_cardinality(profiles, out)

@@ -433,6 +433,54 @@ def _bloque_hallazgos(df, hallazgos):
 
 
 
+def _aviso_raros(raros):
+    """El aviso corto y visible arriba del resumen. Nombra columna y fila."""
+    i = raros[0]
+    filas = i.payload.get("filas", [])
+    donde = (f"fila {filas[0]['fila']}" if len(filas) == 1
+             else f"filas {filas[0]['fila']}–{filas[-1]['fila']}" if filas else "")
+    extra = (f" y {len(raros) - 1} columna(s) más" if len(raros) > 1 else "")
+    st.warning(
+        f"**Ojo: hay datos que se ven raros.** En **{i.column}**, {i.n_affected} "
+        f"registro(s) valen {fmt_num(i.payload.get('umbral', 0))} o más cuando lo "
+        f"típico es {fmt_num(i.payload.get('mediana', 0))}"
+        + (f" ({donde} del archivo)" if donde else "") + extra
+        + ". El detalle está en **Calidad de datos**.", icon="🔎")
+
+
+def _bloque_sospechosos(df, issues):
+    """Los valores fuera de escala, con su fila exacta. Lo primero que hay que ver."""
+    raros = [i for i in issues if i.code == "valor_raro"]
+    if not raros:
+        return
+    _sec("Ojo", "Datos que se ven raros",
+         f"{sum(i.n_affected for i in raros)} registro(s)")
+    st.warning(
+        "Encontramos valores que se salen tanto del resto que casi siempre son un error "
+        "de captura. **Revísalos antes de confiar en los totales** — te decimos en qué "
+        "fila del archivo están.", icon="🔎")
+
+    for i in raros:
+        with st.container(border=True):
+            st.markdown(f"**{_esc(i.column)}** · "
+                        f"{'🔴 revísalo ya' if i.severity == 'crítico' else '🟡 revísalo'}")
+            st.markdown(f"<div class='lect'>{_negritas(_esc(i.detail))}</div>",
+                        unsafe_allow_html=True)
+            filas = i.payload.get("filas", [])
+            if filas:
+                tabla = pd.DataFrame([
+                    {"Fila del archivo": f["fila"], i.column: f["valor"],
+                     "Lo normal ahí": i.payload.get("mediana")} for f in filas])
+                st.dataframe(tabla, use_container_width=True, hide_index=True,
+                             height=min(38 * (len(tabla) + 1) + 3, 260))
+                st.caption(
+                    f"«Fila del archivo» es el número de fila tal como lo ves en Excel "
+                    f"(contando el encabezado). Si abres tu archivo y te vas a la fila "
+                    f"{filas[0]['fila']}, columna **{i.column}**, ahí está el valor."
+                    + (f" Mostramos {len(filas)} de {i.payload.get('total_marcadas', len(filas))}."
+                       if i.payload.get("total_marcadas", 0) > len(filas) else ""))
+
+
 def _bloque_problemas(issues, counts):
     if not issues:
         st.success("No encontramos ningún problema en tus datos.", icon="✅")
@@ -593,12 +641,17 @@ def render():
         hallazgos = ins_mod.generate_insights(df, profiles, mapping, issues)
 
     pendientes = len([i for i in issues if not textos.es_corregible(i)])
+    raros = [i for i in issues if i.code == "valor_raro"]
+    etiqueta_calidad = (f"🔎 Calidad de datos ({pendientes})" if raros
+                        else f"Calidad de datos ({pendientes})")
     t_resumen, t_graficas, t_calidad, t_descargas = st.tabs(
-        ["Resumen", "Tablero", f"Calidad de datos ({pendientes})", "Descargas"])
+        ["Resumen", "Tablero", etiqueta_calidad, "Descargas"])
 
     # ---------------------------------------------------------------- resumen
     with t_resumen:
         _bloque_limpieza()
+        if raros:
+            _aviso_raros(raros)
         st.info(textos.resumen(hallazgos, overview, score).replace("**", ""), icon="📌")
 
         _sec("Panorama", "Tus números", _periodo(df, mapping))
@@ -627,6 +680,7 @@ def render():
         _sec("Calidad", "Qué tan confiables son estos números")
         _bloque_confianza(score, counts)
         st.write("")
+        _bloque_sospechosos(df, issues)
         _bloque_problemas(issues, counts)
         _bloque_columnas(df, profiles, mapping)
 

@@ -40,6 +40,10 @@ PROBLEMAS = {
     "negativos_sospechosos": (False, "**{col}** tiene {n} valores negativos. Pueden ser "
                                      "devoluciones legítimas o errores de signo — conviene "
                                      "distinguirlos antes de sumar."),
+    "valor_raro": (False, "**{col}** tiene {n} registro(s) fuera de escala: se salen tanto del "
+                          "resto que casi siempre son un error de captura (un cero de más, "
+                          "una carga de prueba o dos campos que se cruzaron). Abajo te decimos "
+                          "en qué fila están."),
     "outliers": (False, "**{col}** tiene {n} valores muchísimo más grandes o más chicos que "
                         "el resto. Revísalos: un cero de más cambia todos tus promedios."),
     "asimetria": (False, "**{col}** está muy desbalanceada: el promedio no representa al "
