@@ -441,6 +441,34 @@ check("No confunde un código de barras con un valor raro",
 check("No inventa rarezas en una distribución sana",
       not any(i.column == "Precio" for i in raros))
 
+seccion("Celdas con forma distinta")
+# El segundo caso que Fernando marcó: un identificador de UN dígito donde todos
+# los demás traen cuatro. Por magnitud no es nada raro — el 1 no es extremo —
+# pero por forma canta: la columna es de códigos de cuatro dígitos.
+rng = np.random.default_rng(11)
+forma = pd.DataFrame({
+    "Id_es_SKUIDx": [int(x) for x in rng.integers(4000, 6800, 400)] + [1, 1, 1],
+    "PostalCode": [int(x) for x in rng.integers(10000, 99999, 403)],
+    "Precio": [round(float(x), 2) for x in rng.gamma(3, 200, 403)],
+})
+pf = profiling.profile_dataframe(forma)
+isf = quality.detect_issues(forma, pf)
+formas = [i for i in isf if i.code == "celda_rara"]
+check("Detecta el identificador de un dígito entre los de cuatro",
+      any(i.column == "Id_es_SKUIDx" for i in formas), str([i.column for i in formas]))
+ide = next((i for i in formas if i.column == "Id_es_SKUIDx"), None)
+if ide:
+    check("Marca las tres celdas", ide.n_affected == 3, str(ide.n_affected))
+    check("Dice en qué fila están",
+          [f["fila"] for f in ide.payload["filas"]] == [402, 403, 404],
+          str([f["fila"] for f in ide.payload["filas"]]))
+    check("Trae la posición de la columna para armar la celda",
+          ide.payload.get("col_pos") == 0, str(ide.payload.get("col_pos")))
+check("No marca los códigos postales, que son todos de cinco",
+      not any(i.column == "PostalCode" for i in formas))
+check("Los decimales no vuelven deforme a una columna de precios",
+      not any(i.column == "Precio" for i in formas))
+
 seccion("Resultado")
 if FALLOS:
     print(f"❌ {len(FALLOS)} verificación(es) fallaron:")

@@ -433,34 +433,61 @@ def _bloque_hallazgos(df, hallazgos):
 
 
 
+CODIGOS_RAROS = ("valor_raro", "celda_rara")
+MAX_COLUMNAS_RARAS = 6
+
+
+def _letra_excel(pos: int) -> str:
+    """0 -> A, 16 -> Q, 27 -> AB. Para poder decir «la celda Q10358»."""
+    letras, n = "", pos + 1
+    while n:
+        n, resto = divmod(n - 1, 26)
+        letras = chr(65 + resto) + letras
+    return letras
+
+
+def _celda(columna: str, col_pos: int, fila: int) -> str:
+    raw = st.session_state.get("raw")
+    if raw is not None and columna in list(raw.columns):
+        col_pos = list(raw.columns).index(columna)   # la letra del archivo original
+    return f"{_letra_excel(col_pos)}{fila}"
+
+
+def _rarezas(issues):
+    """Las columnas con celdas sospechosas, de la más rara a la menos."""
+    return sorted([i for i in issues if i.code in CODIGOS_RAROS],
+                  key=lambda i: (i.pct_affected, i.n_affected))
+
+
 def _aviso_raros(raros):
-    """El aviso corto y visible arriba del resumen. Nombra columna y fila."""
+    """El aviso corto y visible arriba del resumen. Nombra la celda."""
     i = raros[0]
     filas = i.payload.get("filas", [])
-    donde = (f"fila {filas[0]['fila']}" if len(filas) == 1
-             else f"filas {filas[0]['fila']}–{filas[-1]['fila']}" if filas else "")
-    extra = (f" y {len(raros) - 1} columna(s) más" if len(raros) > 1 else "")
+    pos = i.payload.get("col_pos", 0)
+    celdas = ", ".join(_celda(i.column, pos, f["fila"]) for f in filas[:3])
+    extra = (f", y en {len(raros) - 1} columna(s) más" if len(raros) > 1 else "")
     st.warning(
-        f"**Ojo: hay datos que se ven raros.** En **{i.column}**, {i.n_affected} "
-        f"registro(s) valen {fmt_num(i.payload.get('umbral', 0))} o más cuando lo "
-        f"típico es {fmt_num(i.payload.get('mediana', 0))}"
-        + (f" ({donde} del archivo)" if donde else "") + extra
-        + ". El detalle está en **Calidad de datos**.", icon="🔎")
+        f"**Ojo: hay valores que podrían estar mal.** En **{i.column}** hay "
+        f"{i.n_affected} celda(s) que no cuadran con el resto"
+        + (f" — por ejemplo {celdas}" if celdas else "") + extra
+        + ". Vale la pena que alguien las revise: el detalle, con la celda exacta, "
+          "está en **Calidad de datos**.", icon="🔎")
 
 
 def _bloque_sospechosos(df, issues):
-    """Los valores fuera de escala, con su fila exacta. Lo primero que hay que ver."""
-    raros = [i for i in issues if i.code == "valor_raro"]
+    """Las celdas sospechosas, con su referencia exacta. Lo primero que hay que ver."""
+    raros = _rarezas(issues)
     if not raros:
         return
-    _sec("Ojo", "Datos que se ven raros",
-         f"{sum(i.n_affected for i in raros)} registro(s)")
+    _sec("Ojo", "Valores que podrían estar mal",
+         f"{len(raros)} columna(s)")
     st.warning(
-        "Encontramos valores que se salen tanto del resto que casi siempre son un error "
-        "de captura. **Revísalos antes de confiar en los totales** — te decimos en qué "
-        "fila del archivo están.", icon="🔎")
+        "Estos valores no cuadran con el resto de su columna. No los cambiamos ni los "
+        "quitamos —puede que estén bien— pero **alguien debería revisarlos** antes de "
+        "confiar en los totales. Te damos la celda exacta.", icon="🔎")
 
-    for i in raros:
+    for i in raros[:MAX_COLUMNAS_RARAS]:
+        pos = i.payload.get("col_pos", 0)
         with st.container(border=True):
             st.markdown(f"**{_esc(i.column)}** · "
                         f"{'🔴 revísalo ya' if i.severity == 'crítico' else '🟡 revísalo'}")
@@ -469,16 +496,19 @@ def _bloque_sospechosos(df, issues):
             filas = i.payload.get("filas", [])
             if filas:
                 tabla = pd.DataFrame([
-                    {"Fila del archivo": f["fila"], i.column: f["valor"],
-                     "Lo normal ahí": i.payload.get("mediana")} for f in filas])
+                    {"Celda": _celda(i.column, pos, f["fila"]),
+                     "Fila del archivo": f["fila"],
+                     "Valor que trae": f["valor"]} for f in filas])
                 st.dataframe(tabla, use_container_width=True, hide_index=True,
-                             height=min(38 * (len(tabla) + 1) + 3, 260))
+                             height=min(36 * (len(tabla) + 1) + 3, 260))
                 st.caption(
-                    f"«Fila del archivo» es el número de fila tal como lo ves en Excel "
-                    f"(contando el encabezado). Si abres tu archivo y te vas a la fila "
-                    f"{filas[0]['fila']}, columna **{i.column}**, ahí está el valor."
+                    f"Abre tu archivo y ve a la celda **{tabla['Celda'][0]}**: ahí está el "
+                    "primero. La fila es la que ves en Excel, contando el encabezado."
                     + (f" Mostramos {len(filas)} de {i.payload.get('total_marcadas', len(filas))}."
                        if i.payload.get("total_marcadas", 0) > len(filas) else ""))
+    if len(raros) > MAX_COLUMNAS_RARAS:
+        st.caption(f"Hay {len(raros) - MAX_COLUMNAS_RARAS} columna(s) más con detalles "
+                   "parecidos; el reporte descargable las trae todas.")
 
 
 def _bloque_problemas(issues, counts):
@@ -641,7 +671,7 @@ def render():
         hallazgos = ins_mod.generate_insights(df, profiles, mapping, issues)
 
     pendientes = len([i for i in issues if not textos.es_corregible(i)])
-    raros = [i for i in issues if i.code == "valor_raro"]
+    raros = _rarezas(issues)
     etiqueta_calidad = (f"🔎 Calidad de datos ({pendientes})" if raros
                         else f"Calidad de datos ({pendientes})")
     t_resumen, t_graficas, t_calidad, t_descargas = st.tabs(

@@ -40,6 +40,10 @@ PROBLEMAS = {
     "negativos_sospechosos": (False, "**{col}** tiene {n} valores negativos. Pueden ser "
                                      "devoluciones legítimas o errores de signo — conviene "
                                      "distinguirlos antes de sumar."),
+    "celda_rara": (False, "**{col}** tiene {n} celda(s) con una forma distinta al resto de la "
+                          "columna (por ejemplo, un dígito donde todas traen cuatro). Suele ser "
+                          "un dato incompleto o pegado en el lugar equivocado. Abajo te decimos "
+                          "en qué celda están."),
     "valor_raro": (False, "**{col}** tiene {n} registro(s) fuera de escala: se salen tanto del "
                           "resto que casi siempre son un error de captura (un cero de más, "
                           "una carga de prueba o dos campos que se cruzaron). Abajo te decimos "

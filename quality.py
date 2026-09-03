@@ -248,6 +248,21 @@ NOMBRE_CODIGO = re.compile(
     r"(^|[_\s])id([_\s]|$)|_id|id_)", re.I)
 
 
+def _fila_archivo(df: pd.DataFrame, etiqueta) -> int:
+    """Número de fila tal como se ve en Excel (contando el encabezado).
+
+    Se usa la etiqueta del índice, no la posición: la limpieza puede haber
+    quitado filas duplicadas y entonces la posición ya no corresponde a la
+    fila del archivo original, pero la etiqueta sí se conserva.
+    """
+    try:
+        if pd.api.types.is_integer_dtype(df.index.dtype):
+            return int(etiqueta) + 2
+    except Exception:  # noqa: BLE001
+        pass
+    return int(df.index.get_loc(etiqueta)) + 2
+
+
 def _parece_codigo(nombre: str, vals: pd.Series) -> bool:
     """¿Esta columna numérica es en realidad una etiqueta?"""
     n = str(nombre)
@@ -313,7 +328,7 @@ def _valores_raros(df: pd.DataFrame, profiles, out: list[Issue]) -> None:
 
         total = float(v.sum())
         peso = float(marcadas.sum()) / total if total else 0.0
-        filas = [{"fila": int(df.index.get_loc(i)) + 2, "valor": float(x)}
+        filas = [{"fila": _fila_archivo(df, i), "valor": float(x)}
                  for i, x in marcadas.items()][:MAX_RAROS_LISTADOS]
         normal = float(v[v < umbral].max()) if (v < umbral).any() else float(v.median())
 
@@ -328,7 +343,83 @@ def _valores_raros(df: pd.DataFrame, profiles, out: list[Issue]) -> None:
             pct_affected=len(marcadas) / len(v),
             payload={"filas": filas, "umbral": umbral, "normal": normal,
                      "peso": peso, "mediana": float(v.median()),
+                     "col_pos": int(list(df.columns).index(p.name)),
                      "total_marcadas": int(len(marcadas))},
+        ))
+
+
+def _forma(x) -> int:
+    """El 'tamaño' del valor: dígitos enteros si es número, largo si es texto.
+
+    Los decimales se ignoran a propósito. Si no, 636.65 mediría 6 y 640 mediría
+    3, y una columna de precios normal parecería llena de celdas deformes.
+    """
+    if isinstance(x, (int, float, np.integer, np.floating)) and not pd.isna(x):
+        return len(str(abs(int(x))))
+    s = str(x).strip()
+    if s.endswith(".0"):
+        s = s[:-2]
+    return len(s.replace("-", "").replace(" ", "").replace(",", ""))
+
+
+def _celdas_fuera_de_forma(df: pd.DataFrame, profiles, out: list[Issue],
+                           ya_reportadas: set[str]) -> None:
+    """Valores que no tienen la forma del resto de su columna.
+
+    La regla de magnitud no sirve para un identificador: un SKU no es "grande"
+    ni "chico", es un código. Pero sí tiene una forma — casi siempre el mismo
+    número de dígitos. Si el 99.99% de la columna trae cuatro o cinco dígitos y
+    tres celdas traen uno solo, esas tres están mal aunque el número «1» no
+    tenga nada de extremo.
+
+    Se pide que la columna sea muy regular (a lo más tres largos distintos
+    cubren el 95%) y que el largo raro esté al menos a dos caracteres del más
+    cercano, para no marcar el brinco normal de 999 a 1000.
+    """
+    n = len(df)
+    if n < 50:
+        return
+    for p in profiles.values():
+        if p.name in ya_reportadas or p.semantic in ("fecha", "booleano"):
+            continue
+        s = df[p.name].dropna()
+        if len(s) < 50:
+            continue
+        largos = s.map(_forma).value_counts()
+        if largos.empty:
+            continue
+
+        comunes, cubierto = [], 0
+        for largo, cuantos in largos.items():
+            comunes.append(int(largo))
+            cubierto += int(cuantos)
+            if cubierto / len(s) >= 0.95:
+                break
+        if len(comunes) > 3 or cubierto / len(s) < 0.95:
+            continue        # columna sin una forma clara: aquí no hay nada que decir
+
+        raros = [int(l) for l in largos.index
+                 if int(l) not in comunes and min(abs(int(l) - c) for c in comunes) >= 2]
+        if not raros:
+            continue
+        marcadas = s[s.map(_forma).isin(raros)]
+        limite = max(5, int(0.005 * len(s)))
+        if marcadas.empty or len(marcadas) > limite:
+            continue
+
+        filas = [{"fila": _fila_archivo(df, i), "valor": v}
+                 for i, v in marcadas.items()][:MAX_RAROS_LISTADOS]
+        tipico = int(largos.index[0])
+        out.append(Issue(
+            "celda_rara", ADVERTENCIA,
+            f"Valores con forma distinta en '{p.name}'",
+            f"{len(marcadas):,} celda(s) traen {raros[0]} carácter(es) cuando el resto de la "
+            f"columna trae {tipico}. En una columna tan pareja eso casi siempre es un dato "
+            f"incompleto o pegado en el lugar equivocado.",
+            column=p.name, n_affected=int(len(marcadas)),
+            pct_affected=len(marcadas) / len(s),
+            payload={"filas": filas, "col_pos": int(list(df.columns).index(p.name)),
+                     "largo_tipico": tipico, "total_marcadas": int(len(marcadas))},
         ))
 
 
@@ -495,6 +586,9 @@ def detect_issues(df: pd.DataFrame, profiles: dict[str, ColumnProfile]) -> list[
     _text_hygiene(df, profiles, out)
     _numeric_sanity(df, profiles, out)
     _valores_raros(df, profiles, out)
+    _celdas_fuera_de_forma(
+        df, profiles, out,
+        ya_reportadas={i.column for i in out if i.code == "valor_raro" and i.column})
     _date_sanity(df, profiles, out)
     _redundancy(df, profiles, out)
     _high_cardinality(profiles, out)
