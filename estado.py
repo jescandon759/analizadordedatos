@@ -241,7 +241,10 @@ def cargar(df: pd.DataFrame, source: str) -> None:
     st.session_state.model = None
     st.session_state.custom = []
     st.session_state.selected_kpis = None
-    for k in ("_kpi_nuevo", "_kpi_nombre", "_kpi_abierto"):
+    # las llaves del constructor guardan columnas del archivo anterior: si se
+    # quedan, Streamlit truena al no encontrar el valor entre las opciones
+    for k in ("_kpi_nuevo", "_kpi_nombre", "_kpi_abierto", "_kpi_op_prev",
+              "kpi_op", "kpi_fmt", "kpi_filtro_col"):
         st.session_state.pop(k, None)
 
     profiles, issues, _, _, _ = analyze(df)

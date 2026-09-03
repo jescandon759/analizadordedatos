@@ -7,6 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
+import kpis as kpi_mod  # noqa: E402
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
 FALLOS: list[str] = []
@@ -114,9 +115,35 @@ if sel_modo:
           str([i.label for i in at.text_input]))
     op_sel = [s_ for s_ in at.selectbox if "¿Qué quieres calcular?" == (s_.label or "")]
     check("Elige la operación de un menú, sin fórmulas", len(op_sel) == 1)
-    if nombre_in and op_sel:
+
+    # El campo de columna tiene que seguir a la operación EN VIVO. Cuando la
+    # operación vivía dentro del st.form, Streamlit no recalculaba hasta enviar
+    # y «¿De qué columna?» aparecía y desaparecía sin corresponder al menú.
+    def campos_kpi():
+        etiquetas = [s_.label or "" for s_ in at.selectbox]
+        return {
+            "col_a": any(l.startswith("¿De qué columna?") for l in etiquetas),
+            "col_b": any(("Menos esta columna" in l or "Segunda columna" in l
+                          or "Dividir entre" in l or "Por cada" in l) for l in etiquetas),
+            "sin_col": any("no necesita que elijas columna" in c.value for c in at.caption),
+        }
+
+    esperado = {
+        "sumar":  {"col_a": True,  "col_b": False, "sin_col": False},
+        "contar": {"col_a": False, "col_b": False, "sin_col": True},
+        "margen": {"col_a": True,  "col_b": True,  "sin_col": False},
+    }
+    for operacion, esp in esperado.items():
+        at.selectbox(key="kpi_op").set_value(operacion).run()
+        check(f"Los campos siguen a la operación «{operacion}»",
+              campos_kpi() == esp and not at.exception, str(campos_kpi()))
+        check(f"El formato sugerido cambia con «{operacion}»",
+              at.session_state["kpi_fmt"] == kpi_mod.OPERACIONES[operacion][3],
+              str(at.session_state["kpi_fmt"]))
+    at.selectbox(key="kpi_op").set_value("margen").run()
+    nombre_in = [i for i in at.text_input if "se llama tu indicador" in (i.label or "")]
+    if nombre_in:
         nombre_in[0].set_value("Margen propio")
-        op_sel[0].set_value("margen")
         at.run()
         cols = [s_ for s_ in at.selectbox if (s_.label or "").startswith("¿De qué columna?")]
         segunda = [s_ for s_ in at.selectbox if "Menos esta columna" in (s_.label or "")]

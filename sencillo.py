@@ -235,21 +235,48 @@ def _pinta_kpis(kpis, moneda, por_fila: int = 3):
                                f"{fmt_num(k.target)})")
 
 
+FORMATOS = [kpi_mod.FMT_MONEY, kpi_mod.FMT_NUM, kpi_mod.FMT_PCT, kpi_mod.FMT_INT]
+NOMBRE_FORMATO = {"moneda": "Como dinero", "numero": "Como número",
+                  "porcentaje": "Como porcentaje", "entero": "Como cantidad entera"}
+
+
 def _constructor_kpi(df, profiles, mapping):
-    """Arma un KPI eligiendo de menús, sin escribir fórmulas."""
+    """Arma un KPI eligiendo de menús, sin escribir fórmulas.
+
+    Ojo con la estructura: la operación y la condición van FUERA del
+    formulario. Dentro de un `st.form`, Streamlit no recalcula nada hasta que
+    se envía — así que si la operación viviera dentro, al cambiarla el menú se
+    veía distinto pero los campos de abajo seguían siendo los de la operación
+    anterior: aparecía y desaparecía «¿De qué columna?» sin lógica aparente.
+    """
     columnas = list(df.columns)
     numericas = profiling.suggest_metric_columns(profiles) or columnas
     # lo primero que alguien quiere sumar es su importe: que salga por defecto
     for preferida in (mapping.get("costo"), mapping.get("ingreso")):
         if preferida in numericas:
             numericas = [preferida] + [c for c in numericas if c != preferida]
+
+    op = st.selectbox("¿Qué quieres calcular?", list(kpi_mod.OPERACIONES),
+                      format_func=lambda o: kpi_mod.OPERACIONES[o][0], key="kpi_op")
+    _, n_cols, admite_filtro, fmt_sug, _ = kpi_mod.OPERACIONES[op]
+
+    # al cambiar de operación, el formato sugerido cambia con ella
+    if st.session_state.get("_kpi_op_prev") != op:
+        st.session_state["_kpi_op_prev"] = op
+        st.session_state["kpi_fmt"] = fmt_sug
+
+    filtro_col = None
+    if admite_filtro:
+        fc = st.selectbox(
+            "¿Solo cuando se cumpla algo?" if op != "porcentaje" else "¿Qué condición?",
+            ["(sin condición)"] + profiling.suggest_dimension_columns(profiles),
+            key="kpi_filtro_col")
+        if fc != "(sin condición)":
+            filtro_col = fc
+
     with st.form("nuevo_kpi_simple", clear_on_submit=True):
-        c1, c2 = st.columns([1, 1])
-        nombre = c1.text_input("¿Cómo se llama tu indicador?",
+        nombre = st.text_input("¿Cómo se llama tu indicador?",
                                placeholder="Margen, Ventas de mayoreo, Tasa de cancelación…")
-        op = c2.selectbox("¿Qué quieres calcular?", list(kpi_mod.OPERACIONES),
-                          format_func=lambda o: kpi_mod.OPERACIONES[o][0])
-        _, n_cols, admite_filtro, fmt_sug, _ = kpi_mod.OPERACIONES[op]
 
         col_a = col_b = None
         if n_cols >= 1:
@@ -258,26 +285,18 @@ def _constructor_kpi(df, profiles, mapping):
             if n_cols >= 2:
                 col_b = cc[1].selectbox(kpi_mod.ETIQUETA_B.get(op, "Segunda columna"),
                                         columnas if op == "promedio_por" else numericas)
+        else:
+            st.caption(f"«{kpi_mod.OPERACIONES[op][0]}» no necesita que elijas columna: "
+                       "cuenta los registros de tu archivo.")
 
-        filtro_col = filtro_val = None
-        if admite_filtro:
-            categoricas = ["(sin condición)"] + profiling.suggest_dimension_columns(profiles)
-            fc = st.selectbox(
-                "¿Solo cuando se cumpla algo?" if op != "porcentaje" else "¿Qué condición?",
-                categoricas)
-            if fc != "(sin condición)":
-                filtro_col = fc
-                valores = sorted(df[fc].dropna().astype(str).unique())[:200]
-                filtro_val = st.selectbox(f"«{fc}» igual a", valores)
+        filtro_val = None
+        if filtro_col:
+            valores = sorted(df[filtro_col].dropna().astype(str).unique())[:200]
+            filtro_val = st.selectbox(f"«{filtro_col}» igual a", valores)
 
         c3, c4 = st.columns(2)
-        fmt = c3.selectbox("¿Cómo se muestra?",
-                           [kpi_mod.FMT_MONEY, kpi_mod.FMT_NUM, kpi_mod.FMT_PCT, kpi_mod.FMT_INT],
-                           index=[kpi_mod.FMT_MONEY, kpi_mod.FMT_NUM, kpi_mod.FMT_PCT,
-                                  kpi_mod.FMT_INT].index(fmt_sug),
-                           format_func=lambda f: {"moneda": "Como dinero", "numero": "Como número",
-                                                  "porcentaje": "Como porcentaje",
-                                                  "entero": "Como cantidad entera"}[f])
+        fmt = c3.selectbox("¿Cómo se muestra?", FORMATOS, key="kpi_fmt",
+                           format_func=lambda f: NOMBRE_FORMATO[f])
         meta = c4.number_input("Meta (opcional, 0 = sin meta)", value=0.0, step=1.0,
                                help="Si pones una meta, aparece un semáforo debajo del número.")
 
@@ -301,6 +320,9 @@ def _constructor_kpi(df, profiles, mapping):
             st.session_state["_kpi_nuevo"] = True
             st.session_state["_kpi_nombre"] = nombre.strip()
             st.session_state["_kpi_abierto"] = True   # listo para el siguiente
+            # clear_on_submit devuelve el formato a su valor por defecto; al
+            # olvidar la operación anterior se vuelve a aplicar el sugerido
+            st.session_state.pop("_kpi_op_prev", None)
             st.rerun()
 
 
