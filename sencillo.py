@@ -323,6 +323,11 @@ def _constructor_kpi(df, profiles, mapping):
             # clear_on_submit devuelve el formato a su valor por defecto; al
             # olvidar la operación anterior se vuelve a aplicar el sugerido
             st.session_state.pop("_kpi_op_prev", None)
+            # La condición vive fuera del formulario, así que clear_on_submit no
+            # la limpia: se quedaba pegada y el siguiente indicador salía
+            # filtrado sin que se notara («Ventas totales» calculaba en realidad
+            # solo las de un canal).
+            st.session_state.pop("kpi_filtro_col", None)
             st.rerun()
 
 

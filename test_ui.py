@@ -198,6 +198,34 @@ if sel_modo:
                                   len(at.session_state["custom"]) == 2,
                                   str([k.name for k in at.session_state["custom"]]))
 
+    # La condición vive fuera del formulario, así que clear_on_submit no la
+    # limpia: se quedaba pegada y el siguiente indicador salía filtrado sin
+    # avisar. Se crea uno con condición y otro sin tocarla.
+    at.selectbox(key="kpi_op").set_value("sumar").run()
+    at.selectbox(key="kpi_filtro_col").set_value("Canal").run()
+    nf = [i for i in at.text_input if "se llama tu indicador" in (i.label or "")]
+    vf = [s_ for s_ in at.selectbox if "igual a" in (s_.label or "")]
+    if nf and vf:
+        nf[0].set_value("Ventas de un canal")
+        vf[0].set_value("Online")
+        at.run()
+        ba = [b_ for b_ in at.button if "Agregar indicador" in b_.label]
+        if ba:
+            ba[0].click().run()
+            check("Guarda el indicador con su condición",
+                  at.session_state["custom"][-1].formula.startswith("suma_si("),
+                  at.session_state["custom"][-1].formula)
+            nf2 = [i for i in at.text_input if "se llama tu indicador" in (i.label or "")]
+            if nf2:
+                nf2[0].set_value("Ventas de todos")
+                at.run()
+                ba2 = [b_ for b_ in at.button if "Agregar indicador" in b_.label]
+                if ba2:
+                    ba2[0].click().run()
+                    check("La condición no se queda pegada en el siguiente",
+                          at.session_state["custom"][-1].formula == 'suma("Importe")',
+                          at.session_state["custom"][-1].formula)
+
     at.radio(key="kpi_modo").set_value("recomendados").run()
     check("Vuelve a los recomendados", len(at.metric) >= 4 and not at.exception,
           f"{len(at.metric)} métricas")
