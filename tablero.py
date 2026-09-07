@@ -10,6 +10,7 @@ Dos ideas:
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -32,11 +33,26 @@ ALTO_CHICA = 215
 ALTO_GRANDE = 430
 
 
+TIPOS_GRAFICA = {
+    "line": "Línea",
+    "area": "Área",
+    "bar": "Barras",
+    "pie": "Pastel",
+    "hist": "Histograma",
+    "box": "Caja (box plot)",
+    "scatter": "Dispersión",
+    "mapa": "Mapa",
+}
+
+# columnas que se pueden pintar en un mapa sin traer un archivo de fronteras
+RE_PAIS = ("pais", "país", "country", "nacion", "nación")
+
+
 @dataclass
 class Vista:
     id: str
     titulo: str
-    tipo: str                                  # line | bar | hist | box | scatter
+    tipo: str                                  # la recomendada para estos datos
     figura: Callable[[int], object]            # alto -> go.Figure
     resumen: str = ""                          # una línea para la tarjeta chica
     lectura: str = ""
@@ -44,6 +60,101 @@ class Vista:
     cifras: list[tuple[str, str]] = field(default_factory=list)
     tabla: pd.DataFrame | None = None
     nota_tabla: str = ""
+    # material para volver a dibujarla de otra forma en la vista a detalle
+    datos: dict = field(default_factory=dict)
+
+
+# ------------------------------------------- cambiar el tipo de gráfica
+
+
+def tipos_posibles(datos: dict) -> dict[str, str]:
+    """{tipo: ''} si se puede dibujar, o {tipo: motivo} si no.
+
+    El motivo se le enseña al usuario tal cual, así que dice qué le falta a
+    los datos y no «tipo no soportado».
+    """
+    serie = datos.get("serie")
+    cats = datos.get("categorias")
+    vals = datos.get("valores")
+    hay_serie = serie is not None and len(serie) >= 3
+    hay_cats = cats is not None and len(cats) >= 2
+
+    sin_tiempo = ("necesita una columna de fecha para poner los puntos en orden. "
+                  "En estos datos no la encontramos.")
+    sin_cats = ("necesita una columna de categorías —canal, producto, forma de pago— "
+                "para comparar entre ellas.")
+    sin_crudos = ("necesita los valores uno por uno de una columna numérica; aquí solo "
+                  "hay totales ya calculados por periodo.")
+
+    fuera: dict[str, str] = {}
+    fuera["line"] = "" if hay_serie else sin_tiempo
+    fuera["area"] = "" if hay_serie else sin_tiempo
+    fuera["bar"] = "" if (hay_cats or hay_serie) else sin_cats
+
+    if not hay_cats:
+        fuera["pie"] = sin_cats
+    elif not datos.get("aditivo", True):
+        fuera["pie"] = ("este indicador es un promedio o un porcentaje, y esos no se "
+                        "reparten en rebanadas: las partes no suman el total.")
+    elif float(cats.min()) < 0:
+        fuera["pie"] = "hay valores negativos, y un pastel no puede representarlos."
+    elif len(cats) > 12:
+        fuera["pie"] = (f"hay {len(cats)} categorías; un pastel con más de 12 rebanadas "
+                        "deja de leerse. Las barras sí lo aguantan.")
+    else:
+        fuera["pie"] = ""
+
+    fuera["hist"] = "" if (vals is not None and len(vals) >= 20) else sin_crudos
+    fuera["box"] = "" if datos.get("grupo") else (
+        "necesita los valores uno por uno más una columna para agruparlos.")
+    fuera["scatter"] = "" if datos.get("par") else (
+        "necesita dos columnas numéricas que cruzar; en estos datos no hay una segunda.")
+    fuera["mapa"] = "" if datos.get("geo") is not None else (
+        "necesita una columna de países que podamos ubicar. Los estados y municipios "
+        "de México requieren un archivo de fronteras que la app no trae.")
+    return fuera
+
+
+def figura_de_tipo(tipo: str, datos: dict, alto: int):
+    """Dibuja los mismos datos con el tipo que pidió el usuario."""
+    pref = datos.get("prefijo", "")
+    etq = datos.get("etiqueta", "")
+    try:
+        if tipo in ("line", "area"):
+            s = datos["serie"]
+            d = pd.DataFrame({"x": s.index, "y": s.values})
+            if tipo == "area":
+                return charts.area_time(d, "x", "y", ylab=etq, height=alto)
+            return charts.line_time(d, "x", "y", ylab=etq, height=alto)
+        if tipo == "bar":
+            cats = datos.get("categorias")
+            if cats is not None and len(cats) >= 2:
+                e, v, _ = charts.top_con_otros(cats.clip(lower=0), 10)
+                return charts.bar_ranked(e, v, "", etq, height=alto, prefijo=pref)
+            s = datos["serie"]
+            return charts.bar_ranked(datos.get("serie_etq") or [str(i) for i in s.index],
+                                     list(s.values), "", etq, horizontal=False,
+                                     height=alto, prefijo=pref,
+                                     etiquetas_valor=len(s) <= 14)
+        if tipo == "pie":
+            e, v, _ = charts.top_con_otros(datos["categorias"].clip(lower=0), 8)
+            return charts.pastel(e, v, "", height=alto, prefijo=pref)
+        if tipo == "hist":
+            vals = datos["valores"]
+            return charts.histogram(vals, "", etq, height=alto, median=float(vals.median()))
+        if tipo == "box":
+            d, dim, val = datos["grupo"]
+            return charts.box_by_group(d, dim, val, "", height=alto)
+        if tipo == "scatter":
+            d, x, y = datos["par"]
+            return charts.scatter(d, x, y, title="", height=alto)
+        if tipo == "mapa":
+            g = datos["geo"]
+            return charts.mapa_paises(list(g.index), list(g.values), "", height=alto,
+                                      prefijo=pref)
+    except Exception:  # noqa: BLE001 - si algo no cuadra, se cae a la recomendada
+        return None
+    return None
 
 
 # ------------------------------------------------------------------ armado
@@ -77,6 +188,52 @@ def _serie_por_periodo(df, fecha, valor_col=None):
     if len(serie) < 3:
         return None
     return serie, freq, etq
+
+
+def _material(df, profiles, mapping, metrica: str | None, prefijo: str,
+              aditivo: bool, etiqueta: str) -> dict:
+    """Junta todo lo que se puede pintar con estos datos, no solo lo que se pinta.
+
+    Así la vista a detalle puede ofrecer barras, pastel, histograma o caja sin
+    volver a calcular nada.
+    """
+    dim_cols = profiling.suggest_dimension_columns(profiles)
+    num_cols = profiling.suggest_metric_columns(profiles)
+    datos: dict = {"prefijo": prefijo, "aditivo": aditivo, "etiqueta": etiqueta}
+
+    dim = next((d for d in [mapping.get("segmento"), mapping.get("producto"),
+                            mapping.get("cliente")] + list(dim_cols)
+                if d in dim_cols and 1 < df[d].nunique() <= MAX_CATEGORIAS_KPI), None)
+
+    if metrica:
+        v = to_numeric_series(df[metrica]).dropna()
+        if len(v) >= 20:
+            datos["valores"] = v
+        if dim:
+            agg = (df.assign(_v=to_numeric_series(df[metrica])).groupby(dim, observed=True)["_v"]
+                     .sum().sort_values(ascending=False).dropna())
+            if len(agg) >= 2:
+                datos["categorias"] = agg
+            d = df[[dim, metrica]].copy()
+            d[metrica] = to_numeric_series(d[metrica])
+            d = d.dropna()
+            if len(d) > 20:
+                datos["grupo"] = (d, dim, metrica)
+        otras = [c for c in num_cols if c != metrica]
+        if otras:
+            y2 = mapping.get("cantidad") if mapping.get("cantidad") in otras else otras[0]
+            par = df[[metrica, y2]].apply(to_numeric_series).dropna()
+            if len(par) > 20:
+                datos["par"] = (par, y2, metrica)
+
+        pais = next((c for c in dim_cols
+                     if any(p in str(c).lower() for p in RE_PAIS)), None)
+        if pais:
+            geo = (df.assign(_v=to_numeric_series(df[metrica])).groupby(pais, observed=True)["_v"]
+                     .sum().sort_values(ascending=False).dropna())
+            if len(geo) >= 2:
+                datos["geo"] = geo
+    return datos
 
 
 # ------------------------------------------- gráficas de los KPIs del usuario
@@ -128,6 +285,19 @@ def _formula_por_grupo(df: pd.DataFrame, formula: str, dim: str) -> pd.Series:
     return pd.Series(valores).sort_values(ascending=False)
 
 
+_NO_ADITIVAS = ("promedio(", "mediana(", "maximo(", "minimo(", "unicos(", "percentil(")
+
+
+def _es_aditiva(formula: str) -> bool:
+    """¿Las partes suman el total? Solo así tiene sentido un pastel.
+
+    Sumas y conteos sí: el total por canal suma el total general. Un promedio
+    o un porcentaje no: el promedio de los canales no es el promedio global.
+    """
+    f = formula.lower()
+    return "/" not in f and not any(t in f for t in _NO_ADITIVAS)
+
+
 def _atipicos_simples(serie: pd.Series, etq: str, fmt: str, moneda: str) -> list[str]:
     """Periodos que se salen de lo normal, con mediana y MAD (no promedio)."""
     if len(serie) < 6:
@@ -177,6 +347,16 @@ def vistas_de_kpis(df, profiles, mapping, moneda_simbolo: str, customs) -> list[
             continue
         moneda = moneda_simbolo if k.fmt == kpi_mod.FMT_MONEY else ""
 
+        # material para poder redibujarla de otra forma en la vista a detalle
+        col = next((c for c in re.findall(r'"([^"]+)"', k.formula) if c in df.columns), None)
+        datos = _material(df, profiles, mapping, col, moneda, _es_aditiva(k.formula), k.name)
+        if dim:
+            # las categorías se calculan con LA FÓRMULA del usuario, no sumando
+            # la columna: el promedio por canal no es la suma por canal
+            agg_k = _formula_por_grupo(df, k.formula, dim)
+            if len(agg_k) >= 2:
+                datos["categorias"] = agg_k
+
         serie = _serie_de_formula(df, k.formula, fecha, freq) if freq else pd.Series(dtype=float)
         if len(serie) >= 3:
             mejor, peor = serie.idxmax(), serie.idxmin()
@@ -201,7 +381,9 @@ def vistas_de_kpis(df, profiles, mapping, moneda_simbolo: str, customs) -> list[
                 tabla=pd.DataFrame({
                     etq.capitalize(): [expl._etiqueta_fecha(t, freq) for t in serie.index],
                     k.name: serie.values}),
-                nota_tabla=f"Se calcula «{k.help or k.formula}» dentro de cada {etq}."))
+                nota_tabla=f"Se calcula «{k.help or k.formula}» dentro de cada {etq}.",
+                datos={**datos, "serie": serie,
+                       "serie_etq": [expl._etiqueta_fecha(t, freq) for t in serie.index]}))
             continue
 
         # sin fecha usable: se compara el indicador entre categorías
@@ -222,7 +404,8 @@ def vistas_de_kpis(df, profiles, mapping, moneda_simbolo: str, customs) -> list[
                             ("El más alto", str(agg.index[0])),
                             ("El más bajo", str(agg.index[-1]))],
                     tabla=pd.DataFrame({dim: agg.index.astype(str), k.name: agg.values}),
-                    nota_tabla=f"Se calcula «{k.help or k.formula}» dentro de cada {dim}."))
+                    nota_tabla=f"Se calcula «{k.help or k.formula}» dentro de cada {dim}.",
+                    datos={**datos, "categorias": agg}))
     return vistas
 
 
@@ -240,6 +423,7 @@ def construir_vistas(df, profiles, mapping, moneda_simbolo: str) -> list[Vista]:
     pre = moneda or ""
     fecha = mapping.get("fecha") if mapping.get("fecha") in date_cols else (
         date_cols[0] if date_cols else None)
+    base = _material(df, profiles, mapping, metrica, pre, True, metrica)
 
     # -------------------------------------------------- 1. evolución en el tiempo
     if fecha:
@@ -266,7 +450,9 @@ def construir_vistas(df, profiles, mapping, moneda_simbolo: str) -> list[Vista]:
                         (f"Mejor {etq}", expl._etiqueta_fecha(mejor, freq)),
                         (f"Peor {etq}", expl._etiqueta_fecha(peor, freq))],
                 tabla=tabla,
-                nota_tabla=f"El total de {metrica} en cada {etq}."))
+                nota_tabla=f"El total de {metrica} en cada {etq}.",
+                datos={**base, "serie": serie,
+                       "serie_etq": [expl._etiqueta_fecha(t, freq) for t in serie.index]}))
 
         # -------------------------------------------- 2. volumen de operaciones
         res = _serie_por_periodo(df, fecha, None)
@@ -289,7 +475,9 @@ def construir_vistas(df, profiles, mapping, moneda_simbolo: str) -> list[Vista]:
                         (f"{etq.capitalize()}s con datos", str(len(serie)))],
                 tabla=pd.DataFrame({
                     etq.capitalize(): [expl._etiqueta_fecha(t, freq) for t in serie.index],
-                    "Registros": serie.values})))
+                    "Registros": serie.values}),
+                datos={**base, "etiqueta": "Registros", "prefijo": "", "serie": serie,
+                       "serie_etq": [expl._etiqueta_fecha(t, freq) for t in serie.index]}))
 
     # ------------------------------------------------------- 3 y 4. rankings
     preferidas = [mapping.get("segmento"), mapping.get("producto"), mapping.get("cliente")]
@@ -321,7 +509,8 @@ def construir_vistas(df, profiles, mapping, moneda_simbolo: str) -> list[Vista]:
                      if len(agg) > 6 else ("El más chico", str(agg.index[-1])))],
             tabla=pd.DataFrame({dim: agg.index.astype(str), metrica: agg.values,
                                 "% del total": (agg.values / total * 100).round(1)}),
-            nota_tabla="La tabla trae todas las categorías, no solo las del top."))
+            nota_tabla="La tabla trae todas las categorías, no solo las del top.",
+            datos={**base, "categorias": agg}))
 
     # ------------------------------------------------------ 5. distribución
     s = to_numeric_series(df[metrica]).dropna()
@@ -347,7 +536,8 @@ def construir_vistas(df, profiles, mapping, moneda_simbolo: str) -> list[Vista]:
                     ("El 10% más alto pasa de", f"{pre}{fmt_num(float(s.quantile(0.9)))}"),
                     ("El más alto de todos", f"{pre}{fmt_num(float(s.max()))}")],
             nota_tabla=("Si el promedio y la mediana están muy separados, hay unos "
-                        "pocos registros enormes jalando el promedio.")))
+                        "pocos registros enormes jalando el promedio."),
+            datos={**base, "valores": s_vista}))
 
     # ---------------------------------------------------- 6. caja por grupo
     if orden_dims:
@@ -370,7 +560,8 @@ def construir_vistas(df, profiles, mapping, moneda_simbolo: str) -> list[Vista]:
                         ("Su valor típico", f"{pre}{fmt_num(float(med.iloc[-1]))}")],
                 tabla=pd.DataFrame({dim: med.index.astype(str),
                                     f"{metrica} típico": med.values}),
-                nota_tabla="«Típico» es la mediana: la mitad queda arriba y la mitad abajo."))
+                nota_tabla="«Típico» es la mediana: la mitad queda arriba y la mitad abajo.",
+                datos={**base, "grupo": (d, dim, metrica), "aditivo": False}))
 
     # -------------------------------------------------------- 7. dispersión
     otras = [c for c in num_cols if c != metrica]
@@ -393,7 +584,8 @@ def construir_vistas(df, profiles, mapping, moneda_simbolo: str) -> list[Vista]:
                         (f"{metrica} promedio", f"{pre}{fmt_num(float(par[metrica].mean()))}"),
                         (f"{y2} promedio", fmt_num(float(par[y2].mean())))],
                 nota_tabla=("Que dos cosas se muevan juntas no quiere decir que una "
-                            "cause la otra.")))
+                            "cause la otra."),
+                datos={**base, "par": (par, y2, metrica)}))
 
     return vistas[:MAX_VISTAS]
 
@@ -505,8 +697,29 @@ def _detalle(v: Vista):
             st.rerun()
     c2.markdown(f"### {v.titulo}")
 
+    fig = None
+    if v.datos:
+        posibles = tipos_posibles(v.datos)
+        opciones = [t for t in TIPOS_GRAFICA]
+        elegido = st.selectbox(
+            "¿Cómo la quieres ver?", opciones,
+            index=opciones.index(v.tipo) if v.tipo in opciones else 0,
+            format_func=lambda t: TIPOS_GRAFICA[t] + ("" if not posibles[t] else "  ·  no aplica"),
+            key=f"tipo_{v.id}",
+            help="Puedes cambiar el tipo de gráfica. Los marcados «no aplica» no se "
+                 "pueden dibujar con estos datos y te decimos por qué.")
+        motivo = posibles.get(elegido, "")
+        if motivo:
+            st.info(f"**{TIPOS_GRAFICA[elegido]}** no se puede con estos datos: {motivo} "
+                    f"Te dejo **{TIPOS_GRAFICA[v.tipo].lower()}**, que es la que "
+                    "recomendamos aquí.", icon="💡")
+        else:
+            fig = figura_de_tipo(elegido, v.datos, ALTO_GRANDE)
+    if fig is None:
+        fig = v.figura(ALTO_GRANDE)
+
     with st.container(border=True):
-        _pintar(v.figura(ALTO_GRANDE), f"g_{v.id}_{gen}", clickable=False)
+        _pintar(fig, f"g_{v.id}_{gen}", clickable=False)
 
     if v.cifras:
         cols = st.columns(len(v.cifras))

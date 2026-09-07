@@ -380,6 +380,60 @@ def missing_bar(profiles, height: int = 320) -> go.Figure | None:
                       height=max(height, 24 * len(data) + 80), value_fmt=".1f")
 
 
+def pastel(labels, values, title: str = "", height: int = 360, prefijo: str = "",
+           dona: bool = True) -> go.Figure:
+    """Reparto de un total en partes. Solo tiene sentido si las partes suman."""
+    pal = palette()
+    etq = [etiqueta(l) for l in labels]
+    vals = [max(float(v), 0.0) for v in values]
+    _, secondary, _ = _ink()
+    fig = go.Figure(go.Pie(
+        labels=etq, values=vals, hole=0.55 if dona else 0.0, sort=True, direction="clockwise",
+        marker=dict(colors=[pal[i % len(pal)] for i in range(len(etq))],
+                    line=dict(width=2, color="rgba(0,0,0,0)")),
+        textinfo="percent", textfont=dict(size=12),
+        hovertemplate="<b>%{label}</b>: " + prefijo + "%{value:,.2f} (%{percent})<extra></extra>",
+    ))
+    fig = _layout(fig, title, "", "", legend=True, height=height)
+    fig.update_layout(hovermode="closest", margin=dict(l=0, r=0, t=34 if title else 26, b=0),
+                      legend=dict(orientation="v", yanchor="middle", y=0.5, xanchor="left",
+                                  x=1.0, font=dict(color=secondary, size=11)))
+    return fig
+
+
+def area_time(df: pd.DataFrame, x: str, y: str, title: str = "", ylab: str = "",
+              height: int = 360) -> go.Figure:
+    """Lo mismo que line_time pero con el área rellena y sin marcadores."""
+    pal = palette()
+    d = df.sort_values(x)
+    fig = go.Figure(go.Scatter(
+        x=d[x], y=d[y], mode="lines", name=y, line=dict(width=2, color=pal[0], shape="spline"),
+        fill="tozeroy", fillcolor=_alpha(pal[0], 0.28),
+        hovertemplate="%{y:,.2f}<extra></extra>",
+    ))
+    fig = _layout(fig, title, ylab, "", legend=False, height=height)
+    _eje_fechas_es(fig, d[x])
+    return fig
+
+
+# países que plotly reconoce por nombre sin necesidad de un archivo de mapa
+def mapa_paises(labels, values, title: str = "", height: int = 380,
+                prefijo: str = "") -> go.Figure:
+    fig = go.Figure(go.Choropleth(
+        locations=[str(l) for l in labels], locationmode="country names",
+        z=[float(v) for v in values], colorscale=sequential(),
+        marker=dict(line=dict(width=0.5, color="rgba(255,255,255,.6)")),
+        colorbar=dict(thickness=10, len=0.7, outlinewidth=0),
+        hovertemplate="<b>%{location}</b>: " + prefijo + "%{z:,.2f}<extra></extra>",
+    ))
+    fig = _layout(fig, title, "", "", height=height)
+    fig.update_layout(margin=dict(l=0, r=0, t=34 if title else 6, b=0))
+    fig.update_geos(showframe=False, showcoastlines=False, showcountries=True,
+                    countrycolor="rgba(128,128,128,.35)", bgcolor="rgba(0,0,0,0)",
+                    landcolor="rgba(128,128,128,.10)", projection_type="natural earth")
+    return fig
+
+
 def severity_donut(counts: dict, height: int = 220) -> go.Figure:
     labels = [k for k, v in counts.items() if v]
     values = [counts[k] for k in labels]

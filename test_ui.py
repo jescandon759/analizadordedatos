@@ -261,6 +261,35 @@ if sel_modo:
     check("Traen su lectura y sus cifras",
           all(v.lectura and len(v.cifras) >= 3 for v in _vistas))
 
+    # En «Ver a detalle» se puede cambiar el tipo de gráfica. Lo que no se
+    # pueda con esos datos se marca y se dice por qué, en vez de dibujar algo
+    # que engañe.
+    _auto = tab_mod.construir_vistas(_df, prof_mod.profile_dataframe(_df),
+                                     at.session_state["mapping"], "$")
+    _falla = []
+    for _v in _auto + _vistas:
+        _pos = tab_mod.tipos_posibles(_v.datos)
+        if set(_pos) != set(tab_mod.TIPOS_GRAFICA):
+            _falla.append(f"{_v.titulo}: faltan tipos en el dictamen")
+        if _pos.get(_v.tipo):
+            _falla.append(f"{_v.titulo}: la recomendada «{_v.tipo}» aparece como no aplicable")
+        for _t, _motivo in _pos.items():
+            if not _motivo and tab_mod.figura_de_tipo(_t, _v.datos, 300) is None:
+                _falla.append(f"{_v.titulo}: «{_t}» se ofrece pero no dibuja")
+    check("Cada gráfica se puede redibujar en los tipos que ofrece",
+          not _falla, "; ".join(_falla[:3]))
+    _tiempo = next((v for v in _auto if v.tipo == "line"), None)
+    if _tiempo:
+        _p = tab_mod.tipos_posibles(_tiempo.datos)
+        check("Una serie de tiempo ofrece línea, área, barras e histograma",
+              all(not _p[t] for t in ("line", "area", "bar", "hist")), str(_p))
+        check("El mapa se descarta con su motivo, no en silencio",
+              bool(_p["mapa"]) and "país" in _p["mapa"], _p["mapa"][:60])
+    _caja = next((v for v in _auto if v.tipo == "box"), None)
+    if _caja:
+        check("El pastel se bloquea cuando las partes no suman",
+              bool(tab_mod.tipos_posibles(_caja.datos)["pie"]))
+
     at.radio(key="kpi_modo").set_value("recomendados").run()
     check("Vuelve a los recomendados", len(at.metric) >= 4 and not at.exception,
           f"{len(at.metric)} métricas")
