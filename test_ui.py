@@ -226,6 +226,41 @@ if sel_modo:
                           at.session_state["custom"][-1].formula == 'suma("Importe")',
                           at.session_state["custom"][-1].formula)
 
+    # El formato que se guarda es el de la operación, no el del envío anterior:
+    # dentro del formulario el widget devolvía el valor viejo y «Contar
+    # registros» se guardaba como dinero ($1,500.00 en vez de 1,500).
+    at.selectbox(key="kpi_op").set_value("contar").run()
+    ni_c = [i for i in at.text_input if "se llama tu indicador" in (i.label or "")]
+    if ni_c:
+        ni_c[0].set_value("Cuántos registros hay")
+        at.run()
+        bc = [b_ for b_ in at.button if "Agregar indicador" in b_.label]
+        if bc:
+            bc[0].click().run()
+            creado = at.session_state["custom"][-1]
+            check("El formato guardado es el de la operación",
+                  creado.fmt == kpi_mod.FMT_INT and creado.formula == "conteo()",
+                  f"{creado.name} -> {creado.fmt} / {creado.formula}")
+
+    # El tablero tiene que graficar LOS INDICADORES DEL USUARIO, no solo los
+    # automáticos. Antes los ignoraba por completo: definías «Ticket Promedio
+    # Neto» y el tablero seguía mostrando sus propias gráficas.
+    import tablero as tab_mod  # noqa: PLC0415
+    import profiling as prof_mod  # noqa: PLC0415
+    _df = (at.session_state["clean"] if at.session_state["clean"] is not None
+           else at.session_state["raw"])
+    _vistas = tab_mod.vistas_de_kpis(_df, prof_mod.profile_dataframe(_df),
+                                     at.session_state["mapping"], "$",
+                                     at.session_state["custom"])
+    _nombres = [k.name for k in at.session_state["custom"]]
+    check("El tablero grafica los indicadores propios", len(_vistas) >= 2,
+          f"{len(_vistas)} vistas de {len(_nombres)} indicadores")
+    check("Cada gráfica lleva el nombre que le puso el usuario",
+          all(any(n in v.titulo for n in _nombres) for v in _vistas),
+          str([v.titulo for v in _vistas]))
+    check("Traen su lectura y sus cifras",
+          all(v.lectura and len(v.cifras) >= 3 for v in _vistas))
+
     at.radio(key="kpi_modo").set_value("recomendados").run()
     check("Vuelve a los recomendados", len(at.metric) >= 4 and not at.exception,
           f"{len(at.metric)} métricas")

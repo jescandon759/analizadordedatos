@@ -265,9 +265,16 @@ def _constructor_kpi(df, profiles, mapping):
         st.session_state["_kpi_op_prev"] = op
         st.session_state["kpi_fmt"] = fmt_sug
 
+    # El formato también va fuera: dentro del formulario, el widget devuelve el
+    # valor del último envío y no lo que dejó la operación al cambiar — por eso
+    # «Total de transacciones» salía como $1,500.00 en vez de 1,500.
+    c_fmt, c_cond = st.columns(2)
+    fmt = c_fmt.selectbox("¿Cómo se muestra?", FORMATOS, key="kpi_fmt",
+                          format_func=lambda f: NOMBRE_FORMATO[f])
+
     filtro_col = None
     if admite_filtro:
-        fc = st.selectbox(
+        fc = c_cond.selectbox(
             "¿Solo cuando se cumpla algo?" if op != "porcentaje" else "¿Qué condición?",
             ["(sin condición)"] + profiling.suggest_dimension_columns(profiles),
             key="kpi_filtro_col")
@@ -294,10 +301,7 @@ def _constructor_kpi(df, profiles, mapping):
             valores = sorted(df[filtro_col].dropna().astype(str).unique())[:200]
             filtro_val = st.selectbox(f"«{filtro_col}» igual a", valores)
 
-        c3, c4 = st.columns(2)
-        fmt = c3.selectbox("¿Cómo se muestra?", FORMATOS, key="kpi_fmt",
-                           format_func=lambda f: NOMBRE_FORMATO[f])
-        meta = c4.number_input("Meta (opcional, 0 = sin meta)", value=0.0, step=1.0,
+        meta = st.number_input("Meta (opcional, 0 = sin meta)", value=0.0, step=1.0,
                                help="Si pones una meta, aparece un semáforo debajo del número.")
 
         if st.form_submit_button("Agregar indicador", type="primary"):

@@ -21,10 +21,13 @@ import deployment
 import estado
 import explicaciones as expl
 import insights as ins_mod
+import kpis as kpi_mod
 import profiling
 from utils import fmt_num, to_datetime_series, to_numeric_series
 
 MAX_VISTAS = 6
+MAX_VISTAS_AUTO = 3        # cuando el usuario trae sus propios indicadores
+MAX_CATEGORIAS_KPI = 40    # arriba de esto, agrupar por esa columna no dice nada
 ALTO_CHICA = 215
 ALTO_GRANDE = 430
 
@@ -74,6 +77,153 @@ def _serie_por_periodo(df, fecha, valor_col=None):
     if len(serie) < 3:
         return None
     return serie, freq, etq
+
+
+# ------------------------------------------- gráficas de los KPIs del usuario
+
+
+def _fmt_valor(v: float, fmt: str, moneda: str) -> str:
+    """Formatea igual que la tarjeta del indicador, para que los números cuadren."""
+    return kpi_mod.KPIResult("", float(v), fmt).display(moneda)
+
+
+@st.cache_data(show_spinner=False, max_entries=32)
+def _serie_de_formula(df: pd.DataFrame, formula: str, fecha: str, freq: str) -> pd.Series:
+    """Evalúa la fórmula del usuario periodo por periodo.
+
+    Sirve para cualquier fórmula —promedio, margen, porcentaje— porque no
+    interpreta la operación: la calcula sobre las filas de cada periodo, igual
+    que la tarjeta la calcula sobre todas.
+    """
+    f = to_datetime_series(df[fecha])
+    mask = ins_mod.robust_date_mask(f)
+    # to_period no acepta los alias de resample: "ME" es de resample, "M" de periodo
+    periodo = {"D": "D", "W": "W", "ME": "M"}.get(freq, "M")
+    d = df[mask].assign(_p=f[mask].dt.to_period(periodo))
+    valores: dict = {}
+    for periodo, sub in d.groupby("_p", observed=True):
+        try:
+            v = float(kpi_mod.FormulaEvaluator(sub).evaluate(formula))
+        except Exception:  # noqa: BLE001 - fórmula del usuario sobre pocas filas
+            continue
+        if pd.notna(v) and abs(v) != float("inf"):
+            valores[periodo.to_timestamp()] = v
+    serie = pd.Series(valores).sort_index()
+    # el último periodo casi siempre está incompleto y dibuja una caída falsa
+    if len(serie) > 3:
+        serie = serie.iloc[:-1]
+    return serie
+
+
+@st.cache_data(show_spinner=False, max_entries=32)
+def _formula_por_grupo(df: pd.DataFrame, formula: str, dim: str) -> pd.Series:
+    valores: dict = {}
+    for valor, sub in df.groupby(dim, observed=True):
+        try:
+            v = float(kpi_mod.FormulaEvaluator(sub).evaluate(formula))
+        except Exception:  # noqa: BLE001
+            continue
+        if pd.notna(v) and abs(v) != float("inf"):
+            valores[str(valor)] = v
+    return pd.Series(valores).sort_values(ascending=False)
+
+
+def _atipicos_simples(serie: pd.Series, etq: str, fmt: str, moneda: str) -> list[str]:
+    """Periodos que se salen de lo normal, con mediana y MAD (no promedio)."""
+    if len(serie) < 6:
+        return []
+    med = float(serie.median())
+    mad = float((serie - med).abs().median())
+    if mad <= 0:
+        return []
+    fuera = serie[(0.6745 * (serie - med).abs() / mad) > 3.5]
+    salida = []
+    for ts, v in fuera.sort_values(ascending=False).head(3).items():
+        veces = abs(v / med) if med else 0
+        salida.append(
+            f"**{expl._etiqueta_fecha(ts, 'ME')}**: {_fmt_valor(v, fmt, moneda)} contra "
+            f"{_fmt_valor(med, fmt, moneda)} de un {etq} típico"
+            + (f" — {veces:.1f} veces." if veces > 1.2 else "."))
+    return salida
+
+
+def vistas_de_kpis(df, profiles, mapping, moneda_simbolo: str, customs) -> list[Vista]:
+    """Una gráfica por cada indicador que el usuario definió.
+
+    Es lo que faltaba: el tablero armaba sus gráficas por su cuenta e ignoraba
+    por completo los indicadores propios. Si alguien se tomó el trabajo de
+    definir «Ticket Promedio Neto», eso es lo que quiere ver graficado.
+    """
+    vistas: list[Vista] = []
+    date_cols = profiling.suggest_date_columns(profiles)
+    dim_cols = profiling.suggest_dimension_columns(profiles)
+    fecha = mapping.get("fecha") if mapping.get("fecha") in date_cols else (
+        date_cols[0] if date_cols else None)
+
+    dim = next((d for d in [mapping.get("segmento"), mapping.get("producto")] + list(dim_cols)
+                if d in dim_cols and df[d].nunique() <= MAX_CATEGORIAS_KPI), None)
+
+    freq = etq = None
+    if fecha:
+        f = to_datetime_series(df[fecha])
+        d = df[ins_mod.robust_date_mask(f)].assign(_f=f[ins_mod.robust_date_mask(f)])
+        if len(d) > 3:
+            freq, etq = _freq_y_etiqueta((d["_f"].max() - d["_f"].min()).days)
+
+    for n, k in enumerate(customs):
+        try:
+            total = float(kpi_mod.FormulaEvaluator(df).evaluate(k.formula))
+        except Exception:  # noqa: BLE001
+            continue
+        moneda = moneda_simbolo if k.fmt == kpi_mod.FMT_MONEY else ""
+
+        serie = _serie_de_formula(df, k.formula, fecha, freq) if freq else pd.Series(dtype=float)
+        if len(serie) >= 3:
+            mejor, peor = serie.idxmax(), serie.idxmin()
+            vistas.append(Vista(
+                id=f"kpi{n}", tipo="line", titulo=f"{k.name} por {etq}",
+                figura=lambda h, s=serie, nom=k.name: charts.line_time(
+                    pd.DataFrame({"x": s.index, "y": s.values}), "x", "y", ylab=nom, height=h),
+                resumen=f"Ahora: {_fmt_valor(total, k.fmt, moneda_simbolo)} · "
+                        f"mejor {etq}: {expl._etiqueta_fecha(mejor, freq)}",
+                lectura=(f"**Cómo leerla:** cada punto es «{k.name}» calculado solo con los "
+                         f"registros de ese {etq}, con la misma fórmula de la tarjeta. "
+                         f"El mejor fue {expl._etiqueta_fecha(mejor, freq)} con "
+                         f"{_fmt_valor(serie.max(), k.fmt, moneda_simbolo)} y el más flojo "
+                         f"{expl._etiqueta_fecha(peor, freq)} con "
+                         f"{_fmt_valor(serie.min(), k.fmt, moneda_simbolo)}."),
+                atipicos=_atipicos_simples(serie, etq, k.fmt, moneda_simbolo),
+                cifras=[("Con todos los datos", _fmt_valor(total, k.fmt, moneda_simbolo)),
+                        (f"Promedio por {etq}",
+                         _fmt_valor(float(serie.mean()), k.fmt, moneda_simbolo)),
+                        (f"Mejor {etq}", expl._etiqueta_fecha(mejor, freq)),
+                        (f"Peor {etq}", expl._etiqueta_fecha(peor, freq))],
+                tabla=pd.DataFrame({
+                    etq.capitalize(): [expl._etiqueta_fecha(t, freq) for t in serie.index],
+                    k.name: serie.values}),
+                nota_tabla=f"Se calcula «{k.help or k.formula}» dentro de cada {etq}."))
+            continue
+
+        # sin fecha usable: se compara el indicador entre categorías
+        if dim:
+            agg = _formula_por_grupo(df, k.formula, dim)
+            if len(agg) > 1:
+                etiquetas, vals, _ = charts.top_con_otros(agg.clip(lower=0), 8)
+                vistas.append(Vista(
+                    id=f"kpi{n}", tipo="bar", titulo=f"{k.name} por {dim.lower()}",
+                    figura=(lambda h, e=etiquetas, v=vals, nom=k.name, p=moneda:
+                            charts.bar_ranked(e, v, "", nom, height=h, prefijo=p)),
+                    resumen=f"Arriba: {agg.index[0]} "
+                            f"({_fmt_valor(agg.iloc[0], k.fmt, moneda_simbolo)})",
+                    lectura=(f"**Cómo leerla:** «{k.name}» calculado por separado para cada "
+                             f"valor de «{dim}», con la misma fórmula de la tarjeta."),
+                    cifras=[("Con todos los datos", _fmt_valor(total, k.fmt, moneda_simbolo)),
+                            (f"{dim} distintos", str(len(agg))),
+                            ("El más alto", str(agg.index[0])),
+                            ("El más bajo", str(agg.index[-1]))],
+                    tabla=pd.DataFrame({dim: agg.index.astype(str), k.name: agg.values}),
+                    nota_tabla=f"Se calcula «{k.help or k.formula}» dentro de cada {dim}."))
+    return vistas
 
 
 def construir_vistas(df, profiles, mapping, moneda_simbolo: str) -> list[Vista]:
@@ -315,7 +465,7 @@ def _fila(vistas: list[Vista], por_fila: int, alto: int):
                 _tarjeta(v, alto)
 
 
-def _rejilla(vistas: list[Vista]):
+def _rejilla(vistas: list[Vista], propias: int = 0):
     st.caption("Pícale a cualquier gráfica —o a su botón— para abrirla en grande "
                "con su explicación, sus cifras y los datos de atrás.")
     principal, resto = vistas[0], vistas[1:]
@@ -325,6 +475,17 @@ def _rejilla(vistas: list[Vista]):
         _tarjeta(principal, 290)
     with c2:
         _panel_cifras(principal)
+
+    if propias:
+        # el tablero arranca con lo que el usuario definió, no con lo automático
+        mias, automaticas = resto[:propias - 1], resto[propias - 1:]
+        if mias:
+            estado.sec("Tus indicadores", "Los que tú definiste, graficados")
+            _fila(mias, 3, ALTO_CHICA)
+        if automaticas:
+            estado.sec("También", "Lo que encontramos por nuestra cuenta")
+            _fila(automaticas, 3, ALTO_CHICA)
+        return
 
     if resto[:3]:
         estado.sec("Desglose", "De dónde sale el número")
@@ -380,7 +541,21 @@ def _detalle(v: Vista):
 
 
 def render(df, profiles, mapping, moneda):
-    vistas = construir_vistas(df, profiles, mapping, moneda)
+    customs = (st.session_state.get("custom") or []
+               if st.session_state.get("kpi_modo") == "propios" else [])
+    propias: list[Vista] = []
+    if customs:
+        with st.spinner("Graficando tus indicadores…"):
+            propias = vistas_de_kpis(df, profiles, mapping, moneda, customs)
+
+    automaticas = construir_vistas(df, profiles, mapping, moneda)
+    if propias:
+        # las automáticas pasan a segundo plano, pero no se tiran: el usuario
+        # definió qué le importa, no que lo demás deje de existir
+        vistas = propias + automaticas[:MAX_VISTAS_AUTO]
+    else:
+        vistas = automaticas
+
     if not vistas:
         estado.sec("Tablero", "Cómo se ve tu operación")
         st.info("Con estas columnas no alcanza para dibujar gráficas útiles. "
@@ -394,4 +569,4 @@ def render(df, profiles, mapping, moneda):
         _detalle(actual)
         return
     estado.sec("Tablero", "Cómo se ve tu operación", f"{len(vistas)} gráficas")
-    _rejilla(vistas)
+    _rejilla(vistas, propias=len(propias))
