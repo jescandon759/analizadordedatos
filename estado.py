@@ -244,7 +244,7 @@ def cargar(df: pd.DataFrame, source: str) -> None:
     # las llaves del constructor guardan columnas del archivo anterior: si se
     # quedan, Streamlit truena al no encontrar el valor entre las opciones
     for k in ("_kpi_nuevo", "_kpi_nombre", "_kpi_abierto", "_kpi_op_prev",
-              "kpi_op", "kpi_fmt", "kpi_filtro_col"):
+              "kpi_op", "kpi_fmt", "kpi_filtro_col", "kpi_grafica"):
         st.session_state.pop(k, None)
 
     profiles, issues, _, _, _ = analyze(df)

@@ -360,6 +360,8 @@ class CustomKPI:
     fmt: str = FMT_NUM
     target: float | None = None
     help: str = ""
+    # tipo de gráfica que pidió el usuario al definirlo; "auto" = la que le quede
+    grafica: str = "auto"
 
 
 def compute_custom(df: pd.DataFrame, kpis: list[CustomKPI]) -> tuple[list[KPIResult], list[str]]:

@@ -290,6 +290,40 @@ if sel_modo:
         check("El pastel se bloquea cuando las partes no suman",
               bool(tab_mod.tipos_posibles(_caja.datos)["pie"]))
 
+    # Al CREAR el indicador se elige con qué gráfica verlo. Si esa gráfica no
+    # se puede con sus datos, se usa la recomendada y se dice por qué.
+    _sel_g = [s_ for s_ in at.selectbox if (s_.label or "") == "¿Qué tipo de gráfica?"]
+    check("Al crear el indicador se elige el tipo de gráfica", len(_sel_g) == 1,
+          str([s_.label for s_ in at.selectbox])[:120])
+    if _sel_g:
+        check("Ofrece automática y los ocho tipos", len(_sel_g[0].options) == 9,
+              str(_sel_g[0].options))
+        for _op, _graf, _espera in (("sumar", "pie", "pie"), ("promedio", "pie", "line")):
+            at.selectbox(key="kpi_op").set_value(_op).run()
+            at.selectbox(key="kpi_grafica").set_value(_graf).run()
+            _n = [i for i in at.text_input if "se llama tu indicador" in (i.label or "")]
+            if not _n:
+                continue
+            _n[0].set_value(f"Prueba {_op} {_graf}")
+            at.run()
+            _c = [s_ for s_ in at.selectbox if (s_.label or "").startswith("¿De qué columna?")]
+            if _c:
+                _c[0].set_value("Importe")
+            _b = [b_ for b_ in at.button if "Agregar indicador" in b_.label]
+            if not _b:
+                continue
+            _b[0].click().run()
+            _k = at.session_state["custom"][-1]
+            check(f"Guarda la gráfica pedida en «{_op}»", _k.grafica == _graf, _k.grafica)
+            _vk = tab_mod.vistas_de_kpis(_df, prof_mod.profile_dataframe(_df),
+                                         at.session_state["mapping"], "$", [_k])
+            if _vk:
+                check(f"«{_op}» + {_graf} se dibuja como {_espera}",
+                      _vk[0].tipo == _espera, f"{_vk[0].tipo}")
+                if _espera != _graf:
+                    check("Y explica por qué no se pudo",
+                          "Pediste" in _vk[0].aviso, _vk[0].aviso[:70])
+
     at.radio(key="kpi_modo").set_value("recomendados").run()
     check("Vuelve a los recomendados", len(at.metric) >= 4 and not at.exception,
           f"{len(at.metric)} métricas")

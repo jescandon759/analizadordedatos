@@ -268,9 +268,16 @@ def _constructor_kpi(df, profiles, mapping):
     # El formato también va fuera: dentro del formulario, el widget devuelve el
     # valor del último envío y no lo que dejó la operación al cambiar — por eso
     # «Total de transacciones» salía como $1,500.00 en vez de 1,500.
-    c_fmt, c_cond = st.columns(2)
+    c_fmt, c_graf, c_cond = st.columns(3)
     fmt = c_fmt.selectbox("¿Cómo se muestra?", FORMATOS, key="kpi_fmt",
                           format_func=lambda f: NOMBRE_FORMATO[f])
+    grafica = c_graf.selectbox(
+        "¿Qué tipo de gráfica?", ["auto"] + list(tablero.TIPOS_GRAFICA),
+        key="kpi_grafica",
+        format_func=lambda g: ("La que mejor le quede" if g == "auto"
+                               else tablero.TIPOS_GRAFICA[g]),
+        help="Con la que quieres verlo en el tablero. Si no se puede con tus datos, "
+             "te lo decimos y ponemos la que sí funcione.")
 
     filtro_col = None
     if admite_filtro:
@@ -320,7 +327,8 @@ def _constructor_kpi(df, profiles, mapping):
                 return
             st.session_state.custom.append(kpi_mod.CustomKPI(
                 nombre.strip(), formula, fmt, meta or None,
-                kpi_mod.descripcion_kpi(op, col_a, col_b, filtro_col, filtro_val)))
+                kpi_mod.descripcion_kpi(op, col_a, col_b, filtro_col, filtro_val),
+                grafica=grafica))
             st.session_state["_kpi_nuevo"] = True
             st.session_state["_kpi_nombre"] = nombre.strip()
             st.session_state["_kpi_abierto"] = True   # listo para el siguiente

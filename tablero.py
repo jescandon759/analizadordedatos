@@ -62,6 +62,8 @@ class Vista:
     nota_tabla: str = ""
     # material para volver a dibujarla de otra forma en la vista a detalle
     datos: dict = field(default_factory=dict)
+    # por qué no se usó el tipo de gráfica que el usuario pidió, si pidió uno
+    aviso: str = ""
 
 
 # ------------------------------------------- cambiar el tipo de gráfica
@@ -298,6 +300,23 @@ def _es_aditiva(formula: str) -> bool:
     return "/" not in f and not any(t in f for t in _NO_ADITIVAS)
 
 
+def _tipo_pedido(k, datos: dict, recomendada: str) -> tuple[str, str]:
+    """(tipo que se usa, aviso). Respeta lo que pidió el usuario si se puede.
+
+    Si pidió un pastel y el indicador es un promedio, no se dibuja el pastel:
+    se pone la recomendada y se dice por qué, que es lo que sirve.
+    """
+    pedida = getattr(k, "grafica", "auto") or "auto"
+    if pedida == "auto" or pedida not in TIPOS_GRAFICA:
+        return recomendada, ""
+    motivo = tipos_posibles(datos).get(pedida, "")
+    if not motivo:
+        return pedida, ""
+    return recomendada, (
+        f"Pediste **{TIPOS_GRAFICA[pedida].lower()}**, pero {motivo} "
+        f"Te la dejamos en **{TIPOS_GRAFICA[recomendada].lower()}**.")
+
+
 def _atipicos_simples(serie: pd.Series, etq: str, fmt: str, moneda: str) -> list[str]:
     """Periodos que se salen de lo normal, con mediana y MAD (no promedio)."""
     if len(serie) < 6:
@@ -360,10 +379,15 @@ def vistas_de_kpis(df, profiles, mapping, moneda_simbolo: str, customs) -> list[
         serie = _serie_de_formula(df, k.formula, fecha, freq) if freq else pd.Series(dtype=float)
         if len(serie) >= 3:
             mejor, peor = serie.idxmax(), serie.idxmin()
+            completo = {**datos, "serie": serie,
+                        "serie_etq": [expl._etiqueta_fecha(t, freq) for t in serie.index]}
+            tipo, aviso = _tipo_pedido(k, completo, "line")
             vistas.append(Vista(
-                id=f"kpi{n}", tipo="line", titulo=f"{k.name} por {etq}",
-                figura=lambda h, s=serie, nom=k.name: charts.line_time(
-                    pd.DataFrame({"x": s.index, "y": s.values}), "x", "y", ylab=nom, height=h),
+                id=f"kpi{n}", tipo=tipo, titulo=f"{k.name} por {etq}", aviso=aviso,
+                figura=lambda h, d=completo, t=tipo, nom=k.name: (
+                    figura_de_tipo(t, d, h) or charts.line_time(
+                        pd.DataFrame({"x": d["serie"].index, "y": d["serie"].values}),
+                        "x", "y", ylab=nom, height=h)),
                 resumen=f"Ahora: {_fmt_valor(total, k.fmt, moneda_simbolo)} · "
                         f"mejor {etq}: {expl._etiqueta_fecha(mejor, freq)}",
                 lectura=(f"**Cómo leerla:** cada punto es «{k.name}» calculado solo con los "
@@ -382,8 +406,7 @@ def vistas_de_kpis(df, profiles, mapping, moneda_simbolo: str, customs) -> list[
                     etq.capitalize(): [expl._etiqueta_fecha(t, freq) for t in serie.index],
                     k.name: serie.values}),
                 nota_tabla=f"Se calcula «{k.help or k.formula}» dentro de cada {etq}.",
-                datos={**datos, "serie": serie,
-                       "serie_etq": [expl._etiqueta_fecha(t, freq) for t in serie.index]}))
+                datos=completo))
             continue
 
         # sin fecha usable: se compara el indicador entre categorías
@@ -391,10 +414,15 @@ def vistas_de_kpis(df, profiles, mapping, moneda_simbolo: str, customs) -> list[
             agg = _formula_por_grupo(df, k.formula, dim)
             if len(agg) > 1:
                 etiquetas, vals, _ = charts.top_con_otros(agg.clip(lower=0), 8)
+                completo = {**datos, "categorias": agg}
+                tipo, aviso = _tipo_pedido(k, completo, "bar")
                 vistas.append(Vista(
-                    id=f"kpi{n}", tipo="bar", titulo=f"{k.name} por {dim.lower()}",
-                    figura=(lambda h, e=etiquetas, v=vals, nom=k.name, p=moneda:
-                            charts.bar_ranked(e, v, "", nom, height=h, prefijo=p)),
+                    id=f"kpi{n}", tipo=tipo, titulo=f"{k.name} por {dim.lower()}",
+                    aviso=aviso,
+                    figura=(lambda h, d=completo, t=tipo, e=etiquetas, v=vals,
+                            nom=k.name, p=moneda: (
+                                figura_de_tipo(t, d, h)
+                                or charts.bar_ranked(e, v, "", nom, height=h, prefijo=p))),
                     resumen=f"Arriba: {agg.index[0]} "
                             f"({_fmt_valor(agg.iloc[0], k.fmt, moneda_simbolo)})",
                     lectura=(f"**Cómo leerla:** «{k.name}» calculado por separado para cada "
@@ -405,7 +433,7 @@ def vistas_de_kpis(df, profiles, mapping, moneda_simbolo: str, customs) -> list[
                             ("El más bajo", str(agg.index[-1]))],
                     tabla=pd.DataFrame({dim: agg.index.astype(str), k.name: agg.values}),
                     nota_tabla=f"Se calcula «{k.help or k.formula}» dentro de cada {dim}.",
-                    datos={**datos, "categorias": agg}))
+                    datos=completo))
     return vistas
 
 
@@ -632,6 +660,8 @@ def _tarjeta(v: Vista, alto: int):
             st.rerun()
         if v.resumen:
             st.markdown(f"<div class='lect'>{v.resumen}</div>", unsafe_allow_html=True)
+        if v.aviso:
+            st.caption("💡 " + v.aviso.replace("**", ""))
         if st.button("🔍 Ver a detalle y elegir gráfica", key=f"b_{v.id}_{gen}",
                      use_container_width=True):
             _abrir(v.id)
@@ -698,6 +728,8 @@ def _detalle(v: Vista):
     c2.markdown(f"### {v.titulo}")
 
     fig = None
+    if v.aviso:
+        st.info(estado.negritas(v.aviso), icon="💡")
     if v.datos:
         posibles = tipos_posibles(v.datos)
         opciones = [t for t in TIPOS_GRAFICA]
