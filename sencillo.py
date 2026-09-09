@@ -410,7 +410,9 @@ def _kpis_extras(df, profiles, mapping, catalogo, errores, hay_propios):
         st.error(e.replace("**", ""))
     if st.session_state.pop("_kpi_nuevo", None):
         st.success(f"«{st.session_state.pop('_kpi_nombre', '')}» agregado. "
-                   "Puedes seguir agregando los que necesites.", icon="✅")
+                   "Su número ya está aquí abajo; **su gráfica está en la pestaña "
+                   "«Tablero»**, de las primeras. Puedes seguir agregando los que "
+                   "necesites.", icon="✅")
 
     creados = st.session_state.custom
     if creados:
@@ -428,8 +430,8 @@ def _kpis_extras(df, profiles, mapping, catalogo, errores, hay_propios):
     etiqueta = "➕ Crear un indicador" if not creados else "➕ Agregar otro indicador"
     with st.expander(etiqueta, expanded=abierto):
         if creados:
-            st.caption(f"Ya llevas {len(creados)}. Agrega los que quieras: aparecen todos "
-                       "en la rejilla de arriba, uno por tarjeta.")
+            st.caption(f"Ya llevas {len(creados)}. Aquí ves su **número**, en la pestaña "
+                       "**«Tablero»** ves su **gráfica**. Agrega los que quieras.")
         _constructor_kpi(df, profiles, mapping)
 
 
