@@ -632,7 +632,7 @@ def _tarjeta(v: Vista, alto: int):
             st.rerun()
         if v.resumen:
             st.markdown(f"<div class='lect'>{v.resumen}</div>", unsafe_allow_html=True)
-        if st.button("🔍 Ver a detalle", key=f"b_{v.id}_{gen}",
+        if st.button("🔍 Ver a detalle y elegir gráfica", key=f"b_{v.id}_{gen}",
                      use_container_width=True):
             _abrir(v.id)
             st.rerun()
@@ -701,13 +701,16 @@ def _detalle(v: Vista):
     if v.datos:
         posibles = tipos_posibles(v.datos)
         opciones = [t for t in TIPOS_GRAFICA]
+        disponibles = sum(1 for t in opciones if not posibles[t])
+        estado.sec("Tipo de gráfica", "Elige cómo verla",
+                   f"{disponibles} de {len(opciones)} sirven con estos datos")
         elegido = st.selectbox(
-            "¿Cómo la quieres ver?", opciones,
+            "Tipo de gráfica", opciones,
             index=opciones.index(v.tipo) if v.tipo in opciones else 0,
             format_func=lambda t: TIPOS_GRAFICA[t] + ("" if not posibles[t] else "  ·  no aplica"),
-            key=f"tipo_{v.id}",
-            help="Puedes cambiar el tipo de gráfica. Los marcados «no aplica» no se "
-                 "pueden dibujar con estos datos y te decimos por qué.")
+            key=f"tipo_{v.id}", label_visibility="collapsed",
+            help="Cambia el tipo de gráfica. Los marcados «no aplica» no se pueden "
+                 "dibujar con estos datos y te decimos por qué.")
         motivo = posibles.get(elegido, "")
         if motivo:
             st.info(f"**{TIPOS_GRAFICA[elegido]}** no se puede con estos datos: {motivo} "
