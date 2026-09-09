@@ -123,7 +123,8 @@ def _topbar(df):
             "<div class='topbar'><span class='marca'>📊 Analiza tus datos</span>"
             "<span class='sep'>|</span>"
             f"<span class='arch'>{_esc(st.session_state.source)}</span>"
-            f"<span class='meta'>{len(df):,} registros · {df.shape[1]} columnas</span>"
+            f"<span class='meta'>{len(df):,} registros · {df.shape[1]} columnas "
+            f"· {_esc(estado.VERSION)}</span>"
             "</div>", unsafe_allow_html=True)
     with c2:
         if st.button("Analizar otro archivo", use_container_width=True):

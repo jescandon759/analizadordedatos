@@ -15,6 +15,11 @@ import prep
 import profiling
 import quality
 
+# Se sube a mano en cada cambio que se despliega. Sirve para saber de un vistazo
+# si lo que estas viendo en la nube es lo ultimo: si el numero no cambio despues
+# de un push, el servidor sigue corriendo la version vieja y hay que reiniciarlo.
+VERSION = "v7"
+
 CSS = """
 <style>
   :root{--acc:#2a78d6;--acc-2:#215fa8;--line:#e6e4de;--ink:#0b0b0b;--mut:#6e6c66;}
