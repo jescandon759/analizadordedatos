@@ -133,6 +133,11 @@ def clean_number_token(value) -> float:
 
 
 def to_numeric_series(s: pd.Series) -> pd.Series:
+    # Si el archivo trae dos columnas con el mismo nombre, df["Col"] devuelve un
+    # DataFrame y no una serie. Nos quedamos con la primera en vez de tronar: es
+    # preferible una grafica hecha con una de las dos a una pantalla de error.
+    if isinstance(s, pd.DataFrame):
+        s = s.iloc[:, 0]
     if is_numeric(s):
         return s.astype(float)
     return pd.to_numeric(s.map(clean_number_token), errors="coerce")

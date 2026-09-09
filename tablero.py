@@ -203,9 +203,13 @@ def _material(df, profiles, mapping, metrica: str | None, prefijo: str,
     num_cols = profiling.suggest_metric_columns(profiles)
     datos: dict = {"prefijo": prefijo, "aditivo": aditivo, "etiqueta": etiqueta}
 
+    # d != metrica: si la columna que se agrupa fuera la misma que se mide,
+    # df[[dim, metrica]] traeria la columna repetida y d[metrica] dejaria de ser
+    # una serie. Agrupar algo por si mismo tampoco dice nada.
     dim = next((d for d in [mapping.get("segmento"), mapping.get("producto"),
                             mapping.get("cliente")] + list(dim_cols)
-                if d in dim_cols and 1 < df[d].nunique() <= MAX_CATEGORIAS_KPI), None)
+                if d in dim_cols and d != metrica
+                and 1 < df[d].nunique() <= MAX_CATEGORIAS_KPI), None)
 
     if metrica:
         v = to_numeric_series(df[metrica]).dropna()
@@ -366,8 +370,12 @@ def vistas_de_kpis(df, profiles, mapping, moneda_simbolo: str, customs) -> list[
             continue
         moneda = moneda_simbolo if k.fmt == kpi_mod.FMT_MONEY else ""
 
-        # material para poder redibujarla de otra forma en la vista a detalle
-        col = next((c for c in re.findall(r'"([^"]+)"', k.formula) if c in df.columns), None)
+        # material para poder redibujarla de otra forma en la vista a detalle.
+        # Solo sirve una columna NUMERICA: en «% de registros donde Payment sea
+        # visa» la primera entre comillas es «Payment», que es una categoria, no
+        # algo que se pueda promediar ni repartir en un histograma.
+        num_cols = profiling.suggest_metric_columns(profiles)
+        col = next((c for c in re.findall(r'"([^"]+)"', k.formula) if c in num_cols), None)
         datos = _material(df, profiles, mapping, col, moneda, _es_aditiva(k.formula), k.name)
         if dim:
             # las categorías se calculan con LA FÓRMULA del usuario, no sumando
