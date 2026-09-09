@@ -18,7 +18,7 @@ import quality
 # Se sube a mano en cada cambio que se despliega. Sirve para saber de un vistazo
 # si lo que estas viendo en la nube es lo ultimo: si el numero no cambio despues
 # de un push, el servidor sigue corriendo la version vieja y hay que reiniciarlo.
-VERSION = "v7"
+VERSION = "v8"
 
 CSS = """
 <style>

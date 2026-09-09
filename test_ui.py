@@ -283,8 +283,16 @@ if sel_modo:
         _p = tab_mod.tipos_posibles(_tiempo.datos)
         check("Una serie de tiempo ofrece línea, área, barras e histograma",
               all(not _p[t] for t in ("line", "area", "bar", "hist")), str(_p))
-        check("El mapa se descarta con su motivo, no en silencio",
-              bool(_p["mapa"]) and "país" in _p["mapa"], _p["mapa"][:60])
+        # El ejemplo trae una columna «Estado» con estados de la Republica, asi
+        # que el mapa si se puede: antes se descartaba siempre porque solo
+        # sabiamos ubicar paises.
+        check("Con estados de Mexico el mapa se ofrece",
+              not _p["mapa"], _p["mapa"][:70])
+        check("Y el mapa realmente se dibuja",
+              tab_mod.figura_de_tipo("mapa", _tiempo.datos, 300) is not None)
+        check("Ubica los estados dentro del pais",
+              all(14 <= la <= 33 for la in
+                  tab_mod.figura_de_tipo("mapa", _tiempo.datos, 300).data[0].lat))
     _caja = next((v for v in _auto if v.tipo == "box"), None)
     if _caja:
         check("El pastel se bloquea cuando las partes no suman",

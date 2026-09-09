@@ -469,6 +469,39 @@ check("No marca los códigos postales, que son todos de cinco",
 check("Los decimales no vuelven deforme a una columna de precios",
       not any(i.column == "Precio" for i in formas))
 
+seccion("Mapa de estados de Mexico")
+import geo_mx  # noqa: E402, PLC0415
+
+check("Reconoce el nombre oficial largo",
+      geo_mx.normaliza("coahuila de zaragoza") == "coahuila")
+check("Reconoce abreviaturas con puntos",
+      geo_mx.normaliza("S.L.P.") == "san luis potosi", str(geo_mx.normaliza("S.L.P.")))
+check("CDMX, DF y Distrito Federal son el mismo lugar",
+      geo_mx.normaliza("CDMX") == geo_mx.normaliza("Distrito Federal")
+      == geo_mx.normaliza("df") == "ciudad de mexico")
+check("«Mexico» a secas es el Estado de Mexico",
+      geo_mx.normaliza("méxico") == geo_mx.normaliza("Estado de México") == "estado de mexico")
+check("No inventa estados", geo_mx.normaliza("Monterrey") is None
+      and geo_mx.normaliza("visa") is None)
+check("Los 32 estados tienen coordenadas dentro del pais",
+      len(geo_mx.CENTROS) == 32
+      and all(14 <= la <= 33 and -118.5 <= lo <= -86
+              for la, lo in geo_mx.CENTROS.values()))
+check("Todo alias apunta a un estado que existe",
+      all(v in geo_mx.CENTROS for v in geo_mx.ALIAS.values()))
+
+_est = pd.Series(["nuevo león", "méxico", "estado de méxico", "jalisco", "SLP"])
+check("Una columna de estados se reconoce", geo_mx.es_columna_de_estados(_est.unique()))
+check("Una de ciudades no se confunde con estados",
+      not geo_mx.es_columna_de_estados(
+          ["monterrey", "zapopan", "guadalupe", "culiacán", "torreón", "irapuato"]))
+_ag = geo_mx.agrupa_por_estado(_est.value_counts())
+check("Las variantes de un mismo estado se suman una sola vez",
+      _ag.get("estado de mexico") == 2 and len(_ag) == 4, str(_ag))
+_e, _la, _lo, _v = geo_mx.con_coordenadas(_ag)
+check("Sale ordenado de mayor a menor con sus coordenadas",
+      _v == sorted(_v, reverse=True) and len(_e) == len(_la) == len(_lo) == len(_v))
+
 seccion("Resultado")
 if FALLOS:
     print(f"❌ {len(FALLOS)} verificación(es) fallaron:")

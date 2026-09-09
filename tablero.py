@@ -21,6 +21,7 @@ import charts
 import deployment
 import estado
 import explicaciones as expl
+import geo_mx
 import insights as ins_mod
 import kpis as kpi_mod
 import profiling
@@ -112,8 +113,8 @@ def tipos_posibles(datos: dict) -> dict[str, str]:
     fuera["scatter"] = "" if datos.get("par") else (
         "necesita dos columnas numéricas que cruzar; en estos datos no hay una segunda.")
     fuera["mapa"] = "" if datos.get("geo") is not None else (
-        "necesita una columna de países que podamos ubicar. Los estados y municipios "
-        "de México requieren un archivo de fronteras que la app no trae.")
+        "necesita una columna con lugares que podamos ubicar: países, o estados "
+        "de la República. Con ciudades o códigos postales todavía no podemos.")
     return fuera
 
 
@@ -152,6 +153,10 @@ def figura_de_tipo(tipo: str, datos: dict, alto: int):
             return charts.scatter(d, x, y, title="", height=alto)
         if tipo == "mapa":
             g = datos["geo"]
+            if datos.get("geo_mx"):
+                etq_, lat, lon, val = geo_mx.con_coordenadas(dict(g))
+                return charts.mapa_estados_mx(etq_, lat, lon, val, "", height=alto,
+                                              prefijo=pref)
             return charts.mapa_paises(list(g.index), list(g.values), "", height=alto,
                                       prefijo=pref)
     except Exception:  # noqa: BLE001 - si algo no cuadra, se cae a la recomendada
@@ -232,14 +237,45 @@ def _material(df, profiles, mapping, metrica: str | None, prefijo: str,
             if len(par) > 20:
                 datos["par"] = (par, y2, metrica)
 
-        pais = next((c for c in dim_cols
-                     if any(p in str(c).lower() for p in RE_PAIS)), None)
-        if pais:
-            geo = (df.assign(_v=to_numeric_series(df[metrica])).groupby(pais, observed=True)["_v"]
-                     .sum().sort_values(ascending=False).dropna())
-            if len(geo) >= 2:
-                datos["geo"] = geo
+    # El mapa se arma aunque el indicador no tenga columna numerica: «contar
+    # registros» por estado se dibuja perfecto contando cuantos cayeron en cada
+    # uno. Antes esto vivia dentro de «if metrica», y por eso un conteo nunca
+    # llegaba a tener mapa.
+    _material_geo(df, dim_cols, metrica, datos)
     return datos
+
+
+def _material_geo(df, dim_cols, metrica: str | None, datos: dict) -> None:
+    """Deja en `datos` lo necesario para un mapa, si hay donde ubicarlo.
+
+    Primero busca una columna de paises, que Plotly ubica por nombre. Si no hay,
+    busca una de estados de Mexico y la resuelve con nuestra propia tabla.
+    """
+    pais = next((c for c in dim_cols
+                 if any(p in str(c).lower() for p in RE_PAIS)), None)
+    columna, es_mx = pais, False
+    if columna is None:
+        columna = next((c for c in dim_cols
+                        if geo_mx.es_columna_de_estados(df[c].dropna().unique())), None)
+        es_mx = columna is not None
+    if columna is None:
+        return
+
+    if metrica:
+        serie = (df.assign(_v=to_numeric_series(df[metrica]))
+                   .groupby(columna, observed=True)["_v"].sum())
+    else:
+        serie = df.groupby(columna, observed=True).size().astype(float)
+    serie = serie.sort_values(ascending=False).dropna()
+
+    if es_mx:
+        agrupado = geo_mx.agrupa_por_estado(serie)
+        if len(agrupado) >= 2:
+            datos["geo"] = pd.Series(agrupado).sort_values(ascending=False)
+            datos["geo_mx"] = True
+    elif len(serie) >= 2:
+        datos["geo"] = serie
+        datos["geo_mx"] = False
 
 
 # ------------------------------------------- gráficas de los KPIs del usuario

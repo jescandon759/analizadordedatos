@@ -434,6 +434,39 @@ def mapa_paises(labels, values, title: str = "", height: int = 380,
     return fig
 
 
+def mapa_estados_mx(etiquetas, lats, lons, values, title: str = "",
+                    height: int = 380, prefijo: str = "") -> go.Figure:
+    """Mexico por estados, como burbujas sobre el mapa.
+
+    No van rellenos porque pintar el contorno de cada estado exige un archivo de
+    fronteras que habria que descargar; la burbuja dice lo mismo —donde y cuanto—
+    sin depender de que la app tenga internet.
+    """
+    vals = [float(v) for v in values]
+    tope = max(vals) if vals else 1.0
+    # raiz cuadrada: el area de la burbuja es la que se compara a ojo, no el radio
+    tam = [8 + 42 * (v / tope) ** 0.5 for v in vals]
+    fig = go.Figure(go.Scattergeo(
+        lon=lons, lat=lats, text=[str(e) for e in etiquetas], mode="markers",
+        marker=dict(size=tam, color=vals, colorscale=sequential(),
+                    line=dict(width=1, color="rgba(255,255,255,.85)"),
+                    colorbar=dict(thickness=10, len=0.7, outlinewidth=0),
+                    sizemode="diameter"),
+        hovertemplate="<b>%{text}</b>: " + prefijo + "%{marker.color:,.2f}<extra></extra>",
+    ))
+    fig = _layout(fig, title, "", "", height=height)
+    fig.update_layout(margin=dict(l=0, r=0, t=34 if title else 6, b=0))
+    fig.update_geos(
+        scope="north america", center=dict(lat=23.6, lon=-102.0),
+        lonaxis=dict(range=[-118.5, -86.0]), lataxis=dict(range=[14.0, 33.0]),
+        showframe=False, showcoastlines=True, coastlinecolor="rgba(128,128,128,.35)",
+        showcountries=True, countrycolor="rgba(128,128,128,.45)",
+        showsubunits=True, subunitcolor="rgba(128,128,128,.30)",
+        bgcolor="rgba(0,0,0,0)", landcolor="rgba(128,128,128,.10)",
+        lakecolor="rgba(0,0,0,0)", projection_type="mercator")
+    return fig
+
+
 def severity_donut(counts: dict, height: int = 220) -> go.Figure:
     labels = [k for k, v in counts.items() if v]
     values = [counts[k] for k in labels]
